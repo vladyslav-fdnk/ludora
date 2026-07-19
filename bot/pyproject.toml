@@ -1,0 +1,20 @@
+[project]
+name = "bot"
+version = "0.1.0"
+description = "Telegram Game Key Store — Aiogram bot"
+requires-python = ">=3.13"
+dependencies = [
+    "aiogram>=3.13",
+]
+
+# This is an application, not a distributable library, so it should not be
+# built/packaged by uv — it only needs a synced virtual environment.
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP"]

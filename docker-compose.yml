@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  backend:
+    build: ./backend
+    env_file: .env
+    # depends_on only controls container start order. Actual readiness is
+    # enforced by backend/entrypoint.sh, which polls pg_isready before
+    # starting Django.
+    depends_on:
+      - postgres
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+
+  bot:
+    build: ./bot
+    env_file: .env
+    # If BOT_TOKEN is empty, app/main.py logs a warning and exits 0
+    # instead of crash-looping.
+    depends_on:
+      - backend
+    volumes:
+      - ./bot:/app
+
+volumes:
+  postgres_data:
+
+    # TODO: add a redis service once Celery is introduced.
+    # TODO: add an nginx service (see docker/nginx) once the project is deployed.

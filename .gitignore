@@ -1,0 +1,21 @@
+# Environment
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Django
+*.sqlite3
+/backend/staticfiles/
+/backend/media/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docker
+docker-compose.override.yml
