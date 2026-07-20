@@ -7,6 +7,7 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path("api/", include("apps.games.urls")),
+    path("api/orders/", include("apps.orders.urls")),
 
     path(
         "api/schema/",

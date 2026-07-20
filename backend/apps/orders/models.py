@@ -15,6 +15,14 @@ class Order(models.Model):
         related_name="orders",
     )
 
+    license_key = models.OneToOneField(
+        "games.LicenseKey",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="order",
+    )
+
     email = models.EmailField()
 
     status = models.CharField(
@@ -25,6 +33,7 @@ class Order(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    
+    
     def __str__(self):
         return f"Order #{self.id}"
