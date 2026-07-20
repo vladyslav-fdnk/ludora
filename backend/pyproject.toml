@@ -9,6 +9,7 @@ dependencies = [
     "django-filter",
     "psycopg[binary]>=3.2",
     "pillow>=11.0",
+    "drf-spectacular>=0.30.0",
 ]
 
 # This is an application, not a distributable library, so it should not be

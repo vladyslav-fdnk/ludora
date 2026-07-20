@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     # no models/views/serializers exist yet.
     "rest_framework",
     "django_filters",
+    "drf_spectacular",
     "apps.games.apps.GamesConfig",
     "apps.users.apps.UsersConfig",
     "apps.orders.apps.OrdersConfig",
@@ -97,7 +98,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # TODO: add REST_FRAMEWORK settings once Django REST Framework is introduced.
 # TODO: add CELERY_* / CACHES (Redis) settings once Celery is introduced.
 
+
 REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": (
+        "drf_spectacular.openapi.AutoSchema"
+    ),
     "DEFAULT_FILTER_BACKENDS": [
         "django_filters.rest_framework.DjangoFilterBackend",
         "rest_framework.filters.SearchFilter",
@@ -106,4 +111,14 @@ REST_FRAMEWORK = {
         "rest_framework.pagination.PageNumberPagination"
     ),
     "PAGE_SIZE": 10,
+}
+
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Ludora Game Store API",
+    "DESCRIPTION": (
+        "API for digital game keys marketplace. "
+        "Users can browse, search and manage products."
+    ),
+    "VERSION": "1.0.0",
 }
