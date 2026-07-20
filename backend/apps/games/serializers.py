@@ -47,3 +47,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "categories",
             "is_active",
         ]
+
+        
+class ProductWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = [
+            "title",
+            "slug",
+            "description",
+            "product_type",
+            "platform",
+            "categories",
+            "price",
+            "is_active",
+        ]
