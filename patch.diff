@@ -1,0 +1,137 @@
+diff --git a/backend/apps/games/serializers.py b/backend/apps/games/serializers.py
+new file mode 100644
+index 0000000..814fc5d
+--- /dev/null
++++ b/backend/apps/games/serializers.py
+@@ -0,0 +1,49 @@
++from rest_framework import serializers
++
++from apps.games.models import Category, Platform, Product
++
++
++class PlatformSerializer(serializers.ModelSerializer):
++    class Meta:
++        model = Platform
++        fields = ["id", "name", "slug"]
++
++
++class CategorySerializer(serializers.ModelSerializer):
++    class Meta:
++        model = Category
++        fields = ["id", "name", "slug"]
++
++
++class ProductListSerializer(serializers.ModelSerializer):
++    platform = serializers.StringRelatedField()
++
++    class Meta:
++        model = Product
++        fields = [
++            "id",
++            "title",
++            "slug",
++            "price",
++            "platform",
++            "product_type",
++        ]
++
++
++class ProductDetailSerializer(serializers.ModelSerializer):
++    platform = serializers.StringRelatedField()
++    categories = serializers.StringRelatedField(many=True)
++
++    class Meta:
++        model = Product
++        fields = [
++            "id",
++            "title",
++            "slug",
++            "price",
++            "platform",
++            "product_type",
++            "description",
++            "categories",
++            "is_active",
++        ]
+diff --git a/backend/apps/games/urls.py b/backend/apps/games/urls.py
+new file mode 100644
+index 0000000..a5ac39e
+--- /dev/null
++++ b/backend/apps/games/urls.py
+@@ -0,0 +1,10 @@
++from django.urls import path
++
++from apps.games.views import ProductDetailAPIView, ProductListAPIView
++
++app_name = "games"
++
++urlpatterns = [
++    path("products/", ProductListAPIView.as_view(), name="product-list"),
++    path("products/<int:pk>/", ProductDetailAPIView.as_view(), name="product-detail"),
++]
+diff --git a/backend/apps/games/views.py b/backend/apps/games/views.py
+new file mode 100644
+index 0000000..4483e49
+--- /dev/null
++++ b/backend/apps/games/views.py
+@@ -0,0 +1,14 @@
++from rest_framework import generics
++
++from apps.games.models import Product
++from apps.games.serializers import ProductDetailSerializer, ProductListSerializer
++
++
++class ProductListAPIView(generics.ListAPIView):
++    queryset = Product.objects.filter(is_active=True).order_by("title")
++    serializer_class = ProductListSerializer
++
++
++class ProductDetailAPIView(generics.RetrieveAPIView):
++    queryset = Product.objects.filter(is_active=True).order_by("title")
++    serializer_class = ProductDetailSerializer
+diff --git a/backend/config/settings.py b/backend/config/settings.py
+index 780359d..0d92813 100644
+--- a/backend/config/settings.py
++++ b/backend/config/settings.py
+@@ -25,8 +25,8 @@ INSTALLED_APPS = [
+     "django.contrib.sessions",
+     "django.contrib.messages",
+     "django.contrib.staticfiles",
+-    # Project apps. Each one currently only defines its AppConfig —
+-    # no models/views/serializers exist yet.
++    "rest_framework",
++    # Project apps.
+     "apps.games.apps.GamesConfig",
+     "apps.users.apps.UsersConfig",
+     "apps.orders.apps.OrdersConfig",
+diff --git a/backend/config/urls.py b/backend/config/urls.py
+index f8d55a9..93becd6 100644
+--- a/backend/config/urls.py
++++ b/backend/config/urls.py
+@@ -1,9 +1,10 @@
+ from django.contrib import admin
+-from django.urls import path
++from django.urls import include, path
+ 
+ urlpatterns = [
+     path("admin/", admin.site.urls),
++    path("api/", include("apps.games.urls")),
+ ]
+ 
+-# TODO: include apps.games / apps.users / apps.orders / apps.payments URLs
+-# once the REST API (Django REST Framework) is introduced.
++# TODO: include apps.users / apps.orders / apps.payments URLs
++# once their REST API endpoints are introduced.
+diff --git a/backend/pyproject.toml b/backend/pyproject.toml
+index a98c3ac..a085823 100644
+--- a/backend/pyproject.toml
++++ b/backend/pyproject.toml
+@@ -5,6 +5,7 @@ description = "Telegram Game Key Store — Django backend"
+ requires-python = ">=3.13"
+ dependencies = [
+     "django>=5.1,<6.0",
++    "djangorestframework>=3.15,<4.0",
+     "psycopg[binary]>=3.2",
+ ]
+
+

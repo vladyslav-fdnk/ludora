@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # Project apps. Each one currently only defines its AppConfig —
     # no models/views/serializers exist yet.
+    "rest_framework",
     "apps.games.apps.GamesConfig",
     "apps.users.apps.UsersConfig",
     "apps.orders.apps.OrdersConfig",

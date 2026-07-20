@@ -1,9 +1,7 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("api/", include("apps.games.urls")),
 ]
-
-# TODO: include apps.games / apps.users / apps.orders / apps.payments URLs
-# once the REST API (Django REST Framework) is introduced.
