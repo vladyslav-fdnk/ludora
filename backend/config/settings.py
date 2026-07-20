@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     # Project apps. Each one currently only defines its AppConfig —
     # no models/views/serializers exist yet.
     "rest_framework",
+    "django_filters",
     "apps.games.apps.GamesConfig",
     "apps.users.apps.UsersConfig",
     "apps.orders.apps.OrdersConfig",
@@ -95,3 +96,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # TODO: set AUTH_USER_MODEL = "users.User" once a custom user model exists.
 # TODO: add REST_FRAMEWORK settings once Django REST Framework is introduced.
 # TODO: add CELERY_* / CACHES (Redis) settings once Celery is introduced.
+
+REST_FRAMEWORK = {
+    "DEFAULT_FILTER_BACKENDS": [
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+    ],
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination.PageNumberPagination"
+    ),
+    "PAGE_SIZE": 10,
+}
