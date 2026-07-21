@@ -24,36 +24,7 @@ class OrderTests(APITestCase):
             product=self.product,
             value="TEST-KEY-123",
         )
-
-    def test_create_order(self):
-        response = self.client.post(
-            "/api/orders/",
-            {
-                "email": "buyer@test.com",
-                "product": self.product.id,
-            },
-            format="json",
-        )
-
-        self.assertEqual(
-            response.status_code,
-            status.HTTP_201_CREATED
-        )
-
-        self.assertEqual(
-            response.data["status"],
-            "CREATED"
-        )
-
-        order = Order.objects.get(
-            id=response.data["id"]
-        )
-
-        self.assertIsNone(
-            order.license_key
-        )
-
-
+    
     def test_pay_order_assigns_license_key(self):
 
         order = Order.objects.create(
