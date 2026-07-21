@@ -5,6 +5,7 @@ from rest_framework.views import APIView
 from apps.orders.services import pay_order
 from apps.orders.models import Order
 from apps.orders.serializers import OrderSerializer
+from apps.orders.exceptions import OrderPaymentError
 
 
 class OrderCreateAPIView(generics.CreateAPIView):
@@ -25,7 +26,7 @@ class OrderPayAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        except ValueError as e:
+        except OrderPaymentError as e:
             return Response(
                 {"error": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,

@@ -3,6 +3,7 @@ from django.utils import timezone
 
 from apps.games.models import LicenseKey
 from apps.orders.models import Order
+from apps.orders.exceptions import OrderPaymentError
 
 
 @transaction.atomic
@@ -18,7 +19,9 @@ def pay_order(order_id: int) -> Order:
     )
 
     if order.status == Order.Status.PAID:
-        raise ValueError("Already paid")
+        raise OrderPaymentError(
+            "Already paid"
+        )
 
     license_key = (
         LicenseKey.objects
@@ -31,7 +34,9 @@ def pay_order(order_id: int) -> Order:
     )
 
     if not license_key:
-        raise ValueError("No keys available")
+        raise OrderPaymentError(
+            "No keys available"
+        )
 
     license_key.status = LicenseKey.Status.SOLD
     license_key.save()

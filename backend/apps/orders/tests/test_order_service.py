@@ -5,6 +5,7 @@ from django.test import TestCase
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import Order
 from apps.orders.services import pay_order
+from apps.orders.exceptions import OrderPaymentError
 
 
 class OrderServiceTests(TestCase):
@@ -61,7 +62,7 @@ class OrderServiceTests(TestCase):
             status=Order.Status.PAID,
         )
 
-        with self.assertRaises(ValueError) as error:
+        with self.assertRaises(OrderPaymentError)as error:
             pay_order(order.id)
 
         self.assertEqual(

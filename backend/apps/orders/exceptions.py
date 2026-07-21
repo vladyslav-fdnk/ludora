@@ -1,0 +1,2 @@
+class OrderPaymentError(Exception):
+    pass
