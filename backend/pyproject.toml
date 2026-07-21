@@ -12,6 +12,12 @@ dependencies = [
     "drf-spectacular>=0.30.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+]
+
 # This is an application, not a distributable library, so it should not be
 # built/packaged by uv — it only needs a synced virtual environment.
 [tool.uv]
