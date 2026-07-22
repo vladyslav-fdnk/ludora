@@ -1,0 +1,6 @@
+.env
+.pytest_cache/
+.coverage
+*.swp
+*.swo
+*~

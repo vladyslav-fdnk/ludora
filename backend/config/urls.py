@@ -22,4 +22,10 @@ urlpatterns = [
         ),
         name="swagger-ui",
     ),
+
+    path(
+        "api/auth/",
+        include("apps.authentication.urls")
+    ),
+
 ]
