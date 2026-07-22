@@ -1,6 +1,8 @@
 from rest_framework.test import APITestCase
 from rest_framework import status
 
+from django.urls import reverse
+
 from apps.games.models import Product, LicenseKey, Platform
 from apps.orders.models import Order
 
@@ -82,4 +84,32 @@ class OrderTests(APITestCase):
         self.assertEqual(
             response.data["error"],
             "No keys available"
+        )
+
+    def test_pay_already_paid_order_returns_400(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            status=Order.Status.PAID,
+        )
+
+        response = self.client.post(
+            reverse(
+                "orders:order-pay",
+                kwargs={
+                    "pk": order.id,
+                },
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        self.assertEqual(
+            response.data,
+            {
+                "error": "Already paid",
+            },
         )

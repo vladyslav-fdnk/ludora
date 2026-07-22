@@ -5,17 +5,18 @@ from apps.orders.views import (
     OrderPayAPIView,
 )
 
+app_name = "orders"
 
 urlpatterns = [
-
     path(
         "",
-        OrderCreateAPIView.as_view()
+        OrderCreateAPIView.as_view(),
+        name="order-create",
     ),
 
     path(
         "<int:pk>/pay/",
-        OrderPayAPIView.as_view()
+        OrderPayAPIView.as_view(),
+        name="order-pay",
     ),
-
 ]
