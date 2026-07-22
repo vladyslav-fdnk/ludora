@@ -122,3 +122,5 @@ SPECTACULAR_SETTINGS = {
     ),
     "VERSION": "1.0.0",
 }
+
+AUTH_USER_MODEL = "users.User"

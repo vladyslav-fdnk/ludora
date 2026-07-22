@@ -1,13 +1,15 @@
 from decimal import Decimal
 
 from django.urls import reverse
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
 
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 
+
+User = get_user_model()
 
 class ProductDeleteAPIViewTests(APITestCase):
 
@@ -79,8 +81,9 @@ class ProductDeleteAPIViewTests(APITestCase):
         )
 
     def test_deleted_product_not_visible_in_catalog(self):
-        from django.contrib.auth.models import User
+        from django.contrib.auth import get_user_model
 
+        User = get_user_model()
         admin = User.objects.create_superuser(
             username="admin",
             password="password123",

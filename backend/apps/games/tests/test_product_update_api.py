@@ -1,11 +1,14 @@
 from decimal import Decimal
 
 from django.urls import reverse
+from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 
+
+User = get_user_model()
 
 class ProductUpdateAPIViewTests(APITestCase):
 
@@ -47,7 +50,7 @@ class ProductUpdateAPIViewTests(APITestCase):
         )
 
     def test_admin_can_update_product(self):
-        from django.contrib.auth.models import User
+        
 
         admin = User.objects.create_superuser(
             username="admin",
