@@ -1,5 +1,6 @@
 from rest_framework import serializers
 
+
 from apps.orders.models import Order, Payment
 from apps.games.models import Product
 
@@ -27,6 +28,14 @@ class OrderSerializer(serializers.ModelSerializer):
             "license_key",
             "created_at",
         ]
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+
+        if request and request.user.is_authenticated:
+            validated_data["user"] = request.user
+
+        return Order.objects.create(**validated_data)
 
 
 class OrderPaymentSerializer(serializers.ModelSerializer):
