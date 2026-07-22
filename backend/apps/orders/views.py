@@ -17,39 +17,52 @@ from apps.orders.exceptions import OrderPaymentError
 class OrderCreateAPIView(generics.CreateAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+    permission_classes = [
+        IsAuthenticated,
+    ]
 
     def perform_create(self, serializer):
-        if self.request.user.is_authenticated:
-            serializer.save(
-                user=self.request.user,
-                email=self.request.user.email,
-            )
-        else:
-            serializer.save()
+        serializer.save(
+            user=self.request.user,
+            email=self.request.user.email,
+        )
 
 
 class OrderPayAPIView(APIView):
 
     def post(self, request, pk):
+
         try:
-            order = pay_order(pk)
+            order = Order.objects.get(
+                id=pk,
+                user=request.user,
+            )
 
         except Order.DoesNotExist:
             return Response(
-                {"error": "Order not found"},
+                {
+                    "error": "Order not found",
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
+        try:
+            order = pay_order(order.id)
+
         except OrderPaymentError as error:
             return Response(
-                {"error": str(error)},
+                {
+                    "error": str(error),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        serializer = OrderPaymentSerializer(order)
+        serializer = OrderPaymentSerializer(
+            order,
+        )
 
         return Response(
-            serializer.data
+            serializer.data,
         )
 
 

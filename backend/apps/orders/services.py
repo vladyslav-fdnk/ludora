@@ -2,7 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.games.models import LicenseKey
-from apps.orders.models import Order,Payment
+from apps.orders.models import Order, Payment
 from apps.orders.payment_services import create_payment
 from apps.orders.exceptions import OrderPaymentError
 

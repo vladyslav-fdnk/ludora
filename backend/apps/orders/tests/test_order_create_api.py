@@ -29,6 +29,16 @@ class OrderTests(APITestCase):
             value="TEST-KEY-123",
         )
 
+        self.user = User.objects.create_user(
+            username="buyer",
+            email="buyer@test.com",
+            password="password123",
+        )
+
+        self.client.force_authenticate(
+            user=self.user,
+        )
+
     def test_create_order(self):
         response = self.client.post(
             "/api/orders/",
@@ -58,13 +68,34 @@ class OrderTests(APITestCase):
         )
 
     def test_authenticated_user_is_assigned_to_order(self):
-        user = User.objects.create_user(
-            username="buyer",
-            password="password123",
+        response = self.client.post(
+            "/api/orders/",
+            {
+                "email": "buyer@test.com",
+                "product": self.product.id,
+            },
+            format="json",
         )
 
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+
+        order = Order.objects.get(
+            id=response.data["id"],
+        )
+
+        self.assertEqual(
+            order.user,
+            self.user,
+        )
+
+
+    def test_anonymous_user_cannot_create_order(self):
+
         self.client.force_authenticate(
-            user=user
+            user=None,
         )
 
         response = self.client.post(
@@ -78,14 +109,5 @@ class OrderTests(APITestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_201_CREATED
-        )
-
-        order = Order.objects.get(
-            id=response.data["id"]
-        )
-
-        self.assertEqual(
-            order.user,
-            user,
+            status.HTTP_401_UNAUTHORIZED,
         )

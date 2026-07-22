@@ -33,5 +33,6 @@ urlpatterns = [
     path(
         "payments/",
         PaymentCreateAPIView.as_view(),
+        name="payment-create",
     ),
 ]

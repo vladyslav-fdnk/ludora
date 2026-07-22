@@ -2,10 +2,13 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 
 from django.urls import reverse
+from django.contrib.auth import get_user_model
 
 from apps.games.models import Product, LicenseKey, Platform
 from apps.orders.models import Order
 
+
+User = get_user_model()
 
 class OrderTests(APITestCase):
 
@@ -26,12 +29,29 @@ class OrderTests(APITestCase):
             product=self.product,
             value="TEST-KEY-123",
         )
+
+        self.user = User.objects.create_user(
+            username="user1",
+            email="user1@test.com",
+            password="password123",
+        )
+
+        self.other_user = User.objects.create_user(
+            username="user2",
+            email="user2@test.com",
+            password="password123",
+        )
     
     def test_pay_order_assigns_license_key(self):
 
         order = Order.objects.create(
             product=self.product,
-            email="buyer@test.com",
+            user=self.user,
+            email=self.user.email,
+        )
+
+        self.client.force_authenticate(
+            user=self.user,
         )
 
         response = self.client.post(
@@ -69,7 +89,12 @@ class OrderTests(APITestCase):
 
         order = Order.objects.create(
             product=self.product,
-            email="buyer@test.com",
+            user=self.user,
+            email=self.user.email,
+        )
+
+        self.client.force_authenticate(
+            user=self.user,
         )
 
         response = self.client.post(
@@ -89,8 +114,13 @@ class OrderTests(APITestCase):
     def test_pay_already_paid_order_returns_400(self):
         order = Order.objects.create(
             product=self.product,
-            email="test@test.com",
+            user=self.user,
+            email=self.user.email,
             status=Order.Status.PAID,
+        )
+
+        self.client.force_authenticate(
+            user=self.user,
         )
 
         response = self.client.post(
@@ -112,4 +142,26 @@ class OrderTests(APITestCase):
             {
                 "error": "Already paid",
             },
+        )
+
+
+    def test_user_cannot_pay_other_users_order(self):
+
+        order = Order.objects.create(
+            product=self.product,
+            user=self.user,
+            email=self.user.email,
+        )
+
+        self.client.force_authenticate(
+            user=self.other_user,
+        )
+
+        response = self.client.post(
+            f"/api/orders/{order.id}/pay/"
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
         )
