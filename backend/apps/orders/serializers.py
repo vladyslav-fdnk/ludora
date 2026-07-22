@@ -29,14 +29,6 @@ class OrderSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
-    def create(self, validated_data):
-        request = self.context.get("request")
-
-        if request and request.user.is_authenticated:
-            validated_data["user"] = request.user
-
-        return Order.objects.create(**validated_data)
-
 
 class OrderPaymentSerializer(serializers.ModelSerializer):
     license_key = serializers.CharField(
@@ -61,6 +53,25 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
             return "Payment successful"
 
         return "Payment pending"
+
+
+class MyOrderSerializer(serializers.ModelSerializer):
+    product = serializers.CharField(
+        source="product.title",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Order
+        fields = [
+            "order_number",
+            "product",
+            "status",
+            "price_paid",
+            "created_at",
+            "paid_at",
+        ]
+
 
 
 class PaymentSerializer(serializers.ModelSerializer):

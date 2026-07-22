@@ -1,19 +1,31 @@
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
 
 from apps.orders.services import pay_order
 from apps.orders.models import Order
 from apps.orders.serializers import (
+    MyOrderSerializer,
     OrderSerializer,
     OrderPaymentSerializer,
 )
 from apps.orders.exceptions import OrderPaymentError
 
 
+
 class OrderCreateAPIView(generics.CreateAPIView):
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
+
+    def perform_create(self, serializer):
+        if self.request.user.is_authenticated:
+            serializer.save(
+                user=self.request.user,
+                email=self.request.user.email,
+            )
+        else:
+            serializer.save()
 
 
 class OrderPayAPIView(APIView):
@@ -38,4 +50,20 @@ class OrderPayAPIView(APIView):
 
         return Response(
             serializer.data
+        )
+
+
+class MyOrdersAPIView(generics.ListAPIView):
+    serializer_class = MyOrderSerializer
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
+    def get_queryset(self):
+        return (
+            Order.objects.filter(
+                user=self.request.user,
+            )
+            .select_related("product")
+            .order_by("-created_at")
         )
