@@ -4,7 +4,10 @@ from rest_framework.views import APIView
 
 from apps.orders.services import pay_order
 from apps.orders.models import Order
-from apps.orders.serializers import OrderSerializer
+from apps.orders.serializers import (
+    OrderSerializer,
+    OrderPaymentSerializer,
+)
 from apps.orders.exceptions import OrderPaymentError
 
 
@@ -31,10 +34,8 @@ class OrderPayAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        serializer = OrderPaymentSerializer(order)
+
         return Response(
-            {
-                "message": "Payment successful",
-                "order_id": order.id,
-                "license_key": order.license_key.value,
-            }
+            serializer.data
         )

@@ -2,15 +2,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.games.models import LicenseKey
-from apps.orders.models import Order
+from apps.orders.models import Order,Payment
+from apps.orders.payment_services import create_payment
 from apps.orders.exceptions import OrderPaymentError
 
 
 @transaction.atomic
 def pay_order(order_id: int) -> Order:
-    """
-    Pay order and assign available license key.
-    """
 
     order = (
         Order.objects
@@ -43,8 +41,13 @@ def pay_order(order_id: int) -> Order:
 
     order.license_key = license_key
     order.status = Order.Status.PAID
-    order.price_paid = order.product.price
-    order.paid_at = timezone.now()
     order.save()
+
+    Payment.objects.create(
+        order=order,
+        status=Payment.Status.PAID,
+        amount=order.product.price,
+        paid_at=timezone.now(),
+    )
 
     return order

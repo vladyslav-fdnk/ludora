@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.test import TestCase
 
 from apps.games.models import LicenseKey, Platform, Product
-from apps.orders.models import Order
+from apps.orders.models import Order, Payment
 from apps.orders.services import pay_order
 from apps.orders.exceptions import OrderPaymentError
 
@@ -78,13 +78,41 @@ class OrderServiceTests(TestCase):
 
         pay_order(order.id)
 
-        order.refresh_from_db()
+        payment = Payment.objects.get(
+            order=order,
+        )
 
         self.assertEqual(
-            order.price_paid,
+            payment.amount,
             Decimal("59.99"),
         )
 
         self.assertIsNotNone(
-            order.paid_at,
+            payment.paid_at,
+        )
+    
+    def test_payment_created_after_successful_payment(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+        )
+
+        pay_order(order.id)
+
+        payment = Payment.objects.get(
+            order=order,
+        )
+
+        self.assertEqual(
+            payment.status,
+            Payment.Status.PAID,
+        )
+
+        self.assertEqual(
+            payment.amount,
+            Decimal(str(self.product.price)),
+        )
+        
+        self.assertIsNotNone(
+            payment.paid_at,
         )
