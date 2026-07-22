@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.orders.models import Order
+from apps.orders.models import Order, Payment
 from apps.games.models import Product
 
 
@@ -28,6 +28,7 @@ class OrderSerializer(serializers.ModelSerializer):
             "created_at",
         ]
 
+
 class OrderPaymentSerializer(serializers.ModelSerializer):
     license_key = serializers.CharField(
         source="license_key.value", 
@@ -51,3 +52,22 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
             return "Payment successful"
 
         return "Payment pending"
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Payment
+        fields = [
+            "id",
+            "order",
+            "status",
+            "amount",
+            "created_at",
+        ]
+
+        read_only_fields = [
+            "status",
+            "amount",
+            "created_at",
+        ]
