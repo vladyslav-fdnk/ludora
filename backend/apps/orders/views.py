@@ -16,19 +16,14 @@ class OrderCreateAPIView(generics.CreateAPIView):
 class OrderPayAPIView(APIView):
 
     def post(self, request, pk):
-
         try:
             order = pay_order(pk)
 
-        except Order.DoesNotExist:
+        except OrderPaymentError as error:
             return Response(
-                {"error": "Order not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        except OrderPaymentError as e:
-            return Response(
-                {"error": str(e)},
+                {
+                    "error": str(error),
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -37,5 +32,6 @@ class OrderPayAPIView(APIView):
                 "message": "Payment successful",
                 "order_id": order.id,
                 "license_key": order.license_key.value,
-            }
+            },
+            status=status.HTTP_200_OK,
         )
