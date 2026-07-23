@@ -7,7 +7,7 @@ from apps.orders.models import (
     Order,
     Payment,
 )
-from apps.orders.services import create_payment
+from apps.orders.payment_services import create_payment
 
 
 class PaymentServiceTests(TestCase):
