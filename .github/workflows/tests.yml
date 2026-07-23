@@ -33,8 +33,9 @@ jobs:
       - name: Start Docker services
         run: docker compose up -d --build
 
+      - name: Run lint
+        run: docker compose exec -T backend uv run ruff check .
+      
       - name: Run tests
         run: docker compose exec -T backend uv run pytest
       
-      - name: Run lint
-        run: docker compose exec -T backend uv run ruff check .
