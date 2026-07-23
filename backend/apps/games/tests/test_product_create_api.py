@@ -1,18 +1,14 @@
-from decimal import Decimal
-
-from django.urls import reverse
 from django.contrib.auth import get_user_model
-
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 
-
 User = get_user_model()
 
-class ProductCreateAPIViewTests(APITestCase):
 
+class ProductCreateAPIViewTests(APITestCase):
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -24,10 +20,13 @@ class ProductCreateAPIViewTests(APITestCase):
             password="password123",
         )
 
-    def test_anonymous_user_cannot_create_product(self):
-        url = reverse(
-            "games:product-create"
+        self.user = User.objects.create_user(
+            username="user",
+            password="password123",
         )
+
+    def test_anonymous_user_cannot_create_product(self):
+        url = reverse("games:product-create")
 
         response = self.client.post(
             url,
@@ -53,9 +52,7 @@ class ProductCreateAPIViewTests(APITestCase):
             user=self.admin,
         )
 
-        url = reverse(
-            "games:product-create"
-        )
+        url = reverse("games:product-create")
 
         response = self.client.post(
             url,
@@ -81,20 +78,14 @@ class ProductCreateAPIViewTests(APITestCase):
             "Elden Ring",
         )
 
-        self.assertTrue(
-            Product.objects.filter(
-                slug="elden-ring"
-            ).exists()
-        )
+        self.assertTrue(Product.objects.filter(slug="elden-ring").exists())
 
     def test_admin_cannot_create_product_without_price(self):
         self.client.force_authenticate(
             user=self.admin,
         )
 
-        url = reverse(
-            "games:product-create"
-        )
+        url = reverse("games:product-create")
 
         response = self.client.post(
             url,
@@ -118,7 +109,7 @@ class ProductCreateAPIViewTests(APITestCase):
             "price",
             response.data,
         )
-    
+
     def test_admin_cannot_create_product_with_existing_slug(self):
         Product.objects.create(
             title="Cyberpunk 2077",
@@ -132,9 +123,7 @@ class ProductCreateAPIViewTests(APITestCase):
             user=self.admin,
         )
 
-        url = reverse(
-            "games:product-create"
-        )
+        url = reverse("games:product-create")
 
         response = self.client.post(
             url,
@@ -157,4 +146,32 @@ class ProductCreateAPIViewTests(APITestCase):
         self.assertIn(
             "slug",
             response.data,
+        )
+
+    def test_authenticated_user_cannot_create_product(self):
+        self.client.force_authenticate(
+            user=self.user,
+        )
+
+        url = reverse(
+            "games:product-create",
+        )
+
+        response = self.client.post(
+            url,
+            {
+                "title": "New Game",
+                "slug": "new-game",
+                "description": "Test",
+                "product_type": "GAME",
+                "platform": self.platform.id,
+                "price": "50.00",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_403_FORBIDDEN,
         )

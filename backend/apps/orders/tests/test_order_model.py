@@ -5,7 +5,6 @@ from apps.orders.models import Order
 
 
 class OrderModelTests(TestCase):
-
     def setUp(self):
         platform = Platform.objects.create(
             name="Steam",
@@ -20,17 +19,12 @@ class OrderModelTests(TestCase):
             platform=platform,
         )
 
-
     def test_order_number_generated_automatically(self):
         order = Order.objects.create(
             product=self.product,
             email="test@example.com",
         )
 
-        self.assertIsNotNone(
-            order.order_number
-        )
+        self.assertIsNotNone(order.order_number)
 
-        self.assertTrue(
-            order.order_number.startswith("LUD-")
-        )
+        self.assertTrue(order.order_number.startswith("LUD-"))

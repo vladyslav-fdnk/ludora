@@ -1,15 +1,11 @@
 from rest_framework import serializers
 
-
-from apps.orders.models import Order, Payment
 from apps.games.models import Product
+from apps.orders.models import Order, Payment
 
 
 class OrderSerializer(serializers.ModelSerializer):
-
-    product = serializers.PrimaryKeyRelatedField(
-        queryset=Product.objects.all()
-    )
+    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
 
     class Meta:
         model = Order
@@ -31,10 +27,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
 
 class OrderPaymentSerializer(serializers.ModelSerializer):
-    license_key = serializers.CharField(
-        source="license_key.value", 
-        read_only=True
-    )
+    license_key = serializers.CharField(source="license_key.value", read_only=True)
 
     message = serializers.SerializerMethodField()
 
@@ -47,7 +40,7 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
             "price_paid",
             "paid_at",
         )
-        
+
     def get_message(self, obj):
         if obj.status == Order.Status.PAID:
             return "Payment successful"
@@ -73,9 +66,7 @@ class MyOrderSerializer(serializers.ModelSerializer):
         ]
 
 
-
 class PaymentSerializer(serializers.ModelSerializer):
-
     class Meta:
         model = Payment
         fields = [

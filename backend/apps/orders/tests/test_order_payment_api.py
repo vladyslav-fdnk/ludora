@@ -1,17 +1,15 @@
-from rest_framework.test import APITestCase
-from rest_framework import status
-
-from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
 
-from apps.games.models import Product, LicenseKey, Platform
+from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import Order
-
 
 User = get_user_model()
 
-class OrderTests(APITestCase):
 
+class OrderTests(APITestCase):
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -41,7 +39,7 @@ class OrderTests(APITestCase):
             email="user2@test.com",
             password="password123",
         )
-    
+
     def test_pay_order_assigns_license_key(self):
 
         order = Order.objects.create(
@@ -54,33 +52,18 @@ class OrderTests(APITestCase):
             user=self.user,
         )
 
-        response = self.client.post(
-            f"/api/orders/{order.id}/pay/"
-        )
+        response = self.client.post(f"/api/orders/{order.id}/pay/")
 
-        self.assertEqual(
-            response.status_code,
-            status.HTTP_200_OK
-        )
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
 
-        self.assertEqual(
-            order.status,
-            Order.Status.PAID
-        )
+        self.assertEqual(order.status, Order.Status.PAID)
 
-        self.assertEqual(
-            order.license_key,
-            self.license_key
-        )
+        self.assertEqual(order.license_key, self.license_key)
 
-        self.assertEqual(
-            self.license_key.status,
-            LicenseKey.Status.SOLD
-        )
-
+        self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
 
     def test_pay_order_without_keys(self):
 
@@ -97,19 +80,11 @@ class OrderTests(APITestCase):
             user=self.user,
         )
 
-        response = self.client.post(
-            f"/api/orders/{order.id}/pay/"
-        )
+        response = self.client.post(f"/api/orders/{order.id}/pay/")
 
-        self.assertEqual(
-            response.status_code,
-            status.HTTP_400_BAD_REQUEST
-        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-        self.assertEqual(
-            response.data["error"],
-            "No keys available"
-        )
+        self.assertEqual(response.data["error"], "No keys available")
 
     def test_pay_already_paid_order_returns_400(self):
         order = Order.objects.create(
@@ -144,7 +119,6 @@ class OrderTests(APITestCase):
             },
         )
 
-
     def test_user_cannot_pay_other_users_order(self):
 
         order = Order.objects.create(
@@ -157,9 +131,7 @@ class OrderTests(APITestCase):
             user=self.other_user,
         )
 
-        response = self.client.post(
-            f"/api/orders/{order.id}/pay/"
-        )
+        response = self.client.post(f"/api/orders/{order.id}/pay/")
 
         self.assertEqual(
             response.status_code,

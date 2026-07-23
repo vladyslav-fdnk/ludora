@@ -1,18 +1,16 @@
 from decimal import Decimal
 
-from django.urls import reverse
 from django.contrib.auth import get_user_model
-
+from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 
-
 User = get_user_model()
 
-class ProductDeleteAPIViewTests(APITestCase):
 
+class ProductDeleteAPIViewTests(APITestCase):
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -44,12 +42,8 @@ class ProductDeleteAPIViewTests(APITestCase):
             status.HTTP_401_UNAUTHORIZED,
         )
 
-        self.assertTrue(
-            Product.objects.filter(
-                id=self.product.id
-            ).exists()
-        )
-    
+        self.assertTrue(Product.objects.filter(id=self.product.id).exists())
+
     def test_admin_can_delete_product(self):
         admin = User.objects.create_superuser(
             username="admin",
@@ -76,9 +70,7 @@ class ProductDeleteAPIViewTests(APITestCase):
 
         self.product.refresh_from_db()
 
-        self.assertFalse(
-            self.product.is_active
-        )
+        self.assertFalse(self.product.is_active)
 
     def test_deleted_product_not_visible_in_catalog(self):
         from django.contrib.auth import get_user_model
@@ -100,22 +92,16 @@ class ProductDeleteAPIViewTests(APITestCase):
             },
         )
 
-        response = self.client.delete(
-            delete_url
-        )
+        response = self.client.delete(delete_url)
 
         self.assertEqual(
             response.status_code,
             status.HTTP_204_NO_CONTENT,
         )
 
-        list_url = reverse(
-            "games:product-list"
-        )
+        list_url = reverse("games:product-list")
 
-        response = self.client.get(
-            list_url
-        )
+        response = self.client.get(list_url)
 
         self.assertEqual(
             response.status_code,

@@ -3,13 +3,12 @@ from decimal import Decimal
 from django.test import TestCase
 
 from apps.games.models import LicenseKey, Platform, Product
+from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order, Payment
 from apps.orders.services import pay_order
-from apps.orders.exceptions import OrderPaymentError
 
 
 class OrderServiceTests(TestCase):
-
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -54,7 +53,7 @@ class OrderServiceTests(TestCase):
             self.license_key.status,
             LicenseKey.Status.SOLD,
         )
-    
+
     def test_cannot_pay_already_paid_order(self):
         order = Order.objects.create(
             product=self.product,
@@ -62,14 +61,14 @@ class OrderServiceTests(TestCase):
             status=Order.Status.PAID,
         )
 
-        with self.assertRaises(OrderPaymentError)as error:
+        with self.assertRaises(OrderPaymentError) as error:
             pay_order(order.id)
 
         self.assertEqual(
             str(error.exception),
             "Already paid",
         )
-    
+
     def test_pay_order_saves_payment_data(self):
         order = Order.objects.create(
             product=self.product,
@@ -90,7 +89,7 @@ class OrderServiceTests(TestCase):
         self.assertIsNotNone(
             payment.paid_at,
         )
-    
+
     def test_payment_created_after_successful_payment(self):
         order = Order.objects.create(
             product=self.product,
@@ -112,7 +111,7 @@ class OrderServiceTests(TestCase):
             payment.amount,
             Decimal(str(self.product.price)),
         )
-        
+
         self.assertIsNotNone(
             payment.paid_at,
         )

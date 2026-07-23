@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.games.models import Product, Platform
+from apps.games.models import Platform, Product
 from apps.orders.models import (
     Order,
     Payment,
@@ -11,12 +11,9 @@ from apps.orders.services import create_payment
 
 
 class PaymentServiceTests(TestCase):
-
     def setUp(self):
 
-        self.platform = Platform.objects.create(
-            name="Steam"
-        )
+        self.platform = Platform.objects.create(name="Steam")
 
         self.product = Product.objects.create(
             title="Cyber Game",
@@ -30,9 +27,7 @@ class PaymentServiceTests(TestCase):
             email="test@test.com",
         )
 
-        payment = create_payment(
-            order
-        )
+        payment = create_payment(order)
 
         self.assertEqual(
             payment.order,

@@ -48,7 +48,7 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "is_active",
         ]
 
-        
+
 class ProductWriteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product

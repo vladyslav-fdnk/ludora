@@ -1,14 +1,13 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from rest_framework import status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from apps.orders.models import Order
-from apps.orders.serializers import PaymentSerializer
 from apps.orders.payment_services import create_payment
+from apps.orders.serializers import PaymentSerializer
 
 
 class PaymentCreateAPIView(APIView):
-
     def post(self, request):
         order_id = request.data.get("order")
 

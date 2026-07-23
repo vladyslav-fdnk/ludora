@@ -1,6 +1,6 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics
-from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
@@ -14,10 +14,10 @@ from apps.games.serializers import (
 
 class ProductListAPIView(generics.ListAPIView):
     queryset = (
-    Product.objects.filter(is_active=True)
-    .select_related("platform")
-    .prefetch_related("categories")
-)
+        Product.objects.filter(is_active=True)
+        .select_related("platform")
+        .prefetch_related("categories")
+    )
 
     serializer_class = ProductListSerializer
 
@@ -56,8 +56,8 @@ class ProductCreateAPIView(generics.CreateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductWriteSerializer
     permission_classes = [IsAdminUser]
-    
-    
+
+
 class ProductUpdateAPIView(generics.UpdateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductWriteSerializer
@@ -73,10 +73,6 @@ class ProductDeleteAPIView(generics.UpdateAPIView):
         product = self.get_object()
 
         product.is_active = False
-        product.save(
-            update_fields=["is_active"]
-        )
+        product.save(update_fields=["is_active"])
 
-        return Response(
-            status=204
-        )
+        return Response(status=204)

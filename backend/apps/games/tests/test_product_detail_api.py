@@ -4,11 +4,10 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.games.models import Platform, Product, Category
+from apps.games.models import Category, Platform, Product
 
 
 class ProductDetailAPIViewTests(APITestCase):
-
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -34,15 +33,13 @@ class ProductDetailAPIViewTests(APITestCase):
             price=Decimal("10.00"),
             is_active=False,
         )
-        
+
         self.category = Category.objects.create(
             name="RPG",
             slug="rpg",
         )
 
-        self.product.categories.add(
-            self.category
-        )
+        self.product.categories.add(self.category)
 
     def test_get_product_detail(self):
         url = reverse(
@@ -83,7 +80,7 @@ class ProductDetailAPIViewTests(APITestCase):
             response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
-    
+
     def test_product_detail_contains_categories(self):
         url = reverse(
             "games:product-detail",

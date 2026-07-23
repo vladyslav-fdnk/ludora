@@ -8,7 +8,6 @@ from apps.games.views import (
     ProductUpdateAPIView,
 )
 
-
 app_name = "games"
 
 

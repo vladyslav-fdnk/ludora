@@ -5,28 +5,54 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('orders', '0003_order_order_number_order_paid_at_order_price_paid'),
+        ("orders", "0003_order_order_number_order_paid_at_order_price_paid"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='order',
-            name='order_number',
+            model_name="order",
+            name="order_number",
             field=models.CharField(blank=True, max_length=30, null=True, unique=True),
         ),
         migrations.CreateModel(
-            name='Payment',
+            name="Payment",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('status', models.CharField(choices=[('CREATED', 'Created'), ('PENDING', 'Pending'), ('PAID', 'Paid'), ('FAILED', 'Failed')], default='CREATED', max_length=20)),
-                ('provider', models.CharField(blank=True, max_length=50, null=True)),
-                ('transaction_id', models.CharField(blank=True, max_length=255, null=True, unique=True)),
-                ('amount', models.DecimalField(decimal_places=2, max_digits=10)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('paid_at', models.DateTimeField(blank=True, null=True)),
-                ('order', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payments', to='orders.order')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("CREATED", "Created"),
+                            ("PENDING", "Pending"),
+                            ("PAID", "Paid"),
+                            ("FAILED", "Failed"),
+                        ],
+                        default="CREATED",
+                        max_length=20,
+                    ),
+                ),
+                ("provider", models.CharField(blank=True, max_length=50, null=True)),
+                (
+                    "transaction_id",
+                    models.CharField(blank=True, max_length=255, null=True, unique=True),
+                ),
+                ("amount", models.DecimalField(decimal_places=2, max_digits=10)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("paid_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "order",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="payments",
+                        to="orders.order",
+                    ),
+                ),
             ],
         ),
     ]

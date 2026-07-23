@@ -1,21 +1,18 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from django.utils import timezone
-
-from datetime import timedelta
-
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 from apps.orders.models import Order
 
-
 User = get_user_model()
 
 
 class MyOrdersAPIViewTests(APITestCase):
-
     def setUp(self):
         self.user = User.objects.create_user(
             username="user1",
@@ -63,7 +60,6 @@ class MyOrdersAPIViewTests(APITestCase):
             "orders:my-orders",
         )
 
-
     def test_anonymous_user_cannot_get_orders(self):
         response = self.client.get(
             self.url,
@@ -73,7 +69,6 @@ class MyOrdersAPIViewTests(APITestCase):
             response.status_code,
             status.HTTP_401_UNAUTHORIZED,
         )
-
 
     def test_authenticated_user_can_get_only_own_orders(self):
         self.client.force_authenticate(
@@ -94,10 +89,7 @@ class MyOrdersAPIViewTests(APITestCase):
             2,
         )
 
-        order_numbers = [
-            order["order_number"]
-            for order in response.data["results"]
-        ]
+        order_numbers = [order["order_number"] for order in response.data["results"]]
 
         self.assertIn(
             self.order1.order_number,
@@ -113,7 +105,6 @@ class MyOrdersAPIViewTests(APITestCase):
             self.order3.order_number,
             order_numbers,
         )
-
 
     def test_orders_are_ordered_by_created_date_desc(self):
         self.order1.created_at = timezone.now()

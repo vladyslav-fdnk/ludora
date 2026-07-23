@@ -1,7 +1,7 @@
 import uuid
 
-from django.db import models
 from django.conf import settings
+from django.db import models
 
 from apps.games.models import Product
 
@@ -70,18 +70,15 @@ class Order(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.order_number:
-            self.order_number = (
-                f"LUD-{uuid.uuid4().hex[:10].upper()}"
-            )
+            self.order_number = f"LUD-{uuid.uuid4().hex[:10].upper()}"
 
         super().save(*args, **kwargs)
 
-        
     def __str__(self):
         return f"Order #{self.order_number or self.id}"
-    
-class Payment(models.Model):
 
+
+class Payment(models.Model):
     class Status(models.TextChoices):
         CREATED = "CREATED", "Created"
         PENDING = "PENDING", "Pending"

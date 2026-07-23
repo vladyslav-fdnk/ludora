@@ -4,25 +4,24 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('orders', '0002_order_license_key'),
+        ("orders", "0002_order_license_key"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='order',
-            name='order_number',
+            model_name="order",
+            name="order_number",
             field=models.CharField(blank=True, max_length=20, null=True, unique=True),
         ),
         migrations.AddField(
-            model_name='order',
-            name='paid_at',
+            model_name="order",
+            name="paid_at",
             field=models.DateTimeField(blank=True, null=True),
         ),
         migrations.AddField(
-            model_name='order',
-            name='price_paid',
+            model_name="order",
+            name="price_paid",
             field=models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True),
         ),
     ]

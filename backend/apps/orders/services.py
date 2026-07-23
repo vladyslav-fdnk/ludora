@@ -2,28 +2,20 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.games.models import LicenseKey
-from apps.orders.models import Order, Payment
-from apps.orders.payment_services import create_payment
 from apps.orders.exceptions import OrderPaymentError
+from apps.orders.models import Order, Payment
 
 
 @transaction.atomic
 def pay_order(order_id: int) -> Order:
 
-    order = (
-        Order.objects
-        .select_for_update()
-        .get(id=order_id)
-    )
+    order = Order.objects.select_for_update().get(id=order_id)
 
     if order.status == Order.Status.PAID:
-        raise OrderPaymentError(
-            "Already paid"
-        )
+        raise OrderPaymentError("Already paid")
 
     license_key = (
-        LicenseKey.objects
-        .select_for_update()
+        LicenseKey.objects.select_for_update()
         .filter(
             product=order.product,
             status=LicenseKey.Status.AVAILABLE,
@@ -32,9 +24,7 @@ def pay_order(order_id: int) -> Order:
     )
 
     if not license_key:
-        raise OrderPaymentError(
-            "No keys available"
-        )
+        raise OrderPaymentError("No keys available")
 
     license_key.status = LicenseKey.Status.SOLD
     license_key.save()

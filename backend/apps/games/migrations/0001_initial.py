@@ -5,65 +5,125 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Category',
+            name="Category",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100)),
-                ('slug', models.SlugField(unique=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("name", models.CharField(max_length=100)),
+                ("slug", models.SlugField(unique=True)),
             ],
             options={
-                'verbose_name_plural': 'categories',
-                'ordering': ['name'],
+                "verbose_name_plural": "categories",
+                "ordering": ["name"],
             },
         ),
         migrations.CreateModel(
-            name='Platform',
+            name="Platform",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=100)),
-                ('slug', models.SlugField(unique=True)),
-                ('logo', models.ImageField(blank=True, null=True, upload_to='platforms/')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("name", models.CharField(max_length=100)),
+                ("slug", models.SlugField(unique=True)),
+                ("logo", models.ImageField(blank=True, null=True, upload_to="platforms/")),
             ],
             options={
-                'ordering': ['name'],
+                "ordering": ["name"],
             },
         ),
         migrations.CreateModel(
-            name='Product',
+            name="Product",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('title', models.CharField(max_length=200)),
-                ('slug', models.SlugField(unique=True)),
-                ('description', models.TextField(blank=True)),
-                ('product_type', models.CharField(choices=[('GAME', 'Game'), ('DLC', 'DLC'), ('SUBSCRIPTION', 'Subscription'), ('GIFT_CARD', 'Gift card'), ('SOFTWARE', 'Software')], max_length=20)),
-                ('price', models.DecimalField(decimal_places=2, max_digits=10)),
-                ('is_active', models.BooleanField(default=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('categories', models.ManyToManyField(blank=True, related_name='products', to='games.category')),
-                ('platform', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='products', to='games.platform')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("title", models.CharField(max_length=200)),
+                ("slug", models.SlugField(unique=True)),
+                ("description", models.TextField(blank=True)),
+                (
+                    "product_type",
+                    models.CharField(
+                        choices=[
+                            ("GAME", "Game"),
+                            ("DLC", "DLC"),
+                            ("SUBSCRIPTION", "Subscription"),
+                            ("GIFT_CARD", "Gift card"),
+                            ("SOFTWARE", "Software"),
+                        ],
+                        max_length=20,
+                    ),
+                ),
+                ("price", models.DecimalField(decimal_places=2, max_digits=10)),
+                ("is_active", models.BooleanField(default=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
+                (
+                    "categories",
+                    models.ManyToManyField(
+                        blank=True, related_name="products", to="games.category"
+                    ),
+                ),
+                (
+                    "platform",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="products",
+                        to="games.platform",
+                    ),
+                ),
             ],
             options={
-                'ordering': ['title'],
+                "ordering": ["title"],
             },
         ),
         migrations.CreateModel(
-            name='LicenseKey',
+            name="LicenseKey",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('value', models.TextField()),
-                ('status', models.CharField(choices=[('AVAILABLE', 'Available'), ('RESERVED', 'Reserved'), ('SOLD', 'Sold')], default='AVAILABLE', max_length=20)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('sold_at', models.DateTimeField(blank=True, null=True)),
-                ('product', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='license_keys', to='games.product')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("value", models.TextField()),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("AVAILABLE", "Available"),
+                            ("RESERVED", "Reserved"),
+                            ("SOLD", "Sold"),
+                        ],
+                        default="AVAILABLE",
+                        max_length=20,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("sold_at", models.DateTimeField(blank=True, null=True)),
+                (
+                    "product",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="license_keys",
+                        to="games.product",
+                    ),
+                ),
             ],
         ),
     ]

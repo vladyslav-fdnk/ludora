@@ -1,4 +1,3 @@
-from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -8,24 +7,15 @@ from drf_spectacular.views import (
 urlpatterns = [
     path("api/", include("apps.games.urls")),
     path("api/orders/", include("apps.orders.urls")),
-
     path(
         "api/schema/",
         SpectacularAPIView.as_view(),
         name="schema",
     ),
-
     path(
         "api/docs/",
-        SpectacularSwaggerView.as_view(
-            url_name="schema"
-        ),
+        SpectacularSwaggerView.as_view(url_name="schema"),
         name="swagger-ui",
     ),
-
-    path(
-        "api/auth/",
-        include("apps.authentication.urls")
-    ),
-
+    path("api/auth/", include("apps.authentication.urls")),
 ]

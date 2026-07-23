@@ -6,7 +6,6 @@ from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 
-
 """
 Product API
  ├── active products
@@ -15,6 +14,7 @@ Product API
  ├── search
  └── ordering
 """
+
 
 class ProductListAPIViewTests(APITestCase):
     """
@@ -74,10 +74,7 @@ class ProductListAPIViewTests(APITestCase):
             status.HTTP_200_OK,
         )
 
-        titles = [
-            product["title"]
-            for product in response.data["results"]
-        ]
+        titles = [product["title"] for product in response.data["results"]]
 
         self.assertIn(
             "Cyberpunk 2077",
@@ -102,16 +99,13 @@ class ProductListAPIViewTests(APITestCase):
 
         response = self.client.get(url)
 
-        titles = [
-            product["title"]
-            for product in response.data["results"]
-        ]
+        titles = [product["title"] for product in response.data["results"]]
 
         self.assertNotIn(
             "GTA VI",
             titles,
         )
-    
+
     def test_filter_products_by_platform(self):
         """
         Products can be filtered by platform.
@@ -125,10 +119,7 @@ class ProductListAPIViewTests(APITestCase):
             },
         )
 
-        titles = [
-            product["title"]
-            for product in response.data["results"]
-        ]
+        titles = [product["title"] for product in response.data["results"]]
 
         self.assertIn(
             "Cyberpunk 2077",
@@ -153,10 +144,7 @@ class ProductListAPIViewTests(APITestCase):
             },
         )
 
-        titles = [
-            product["title"]
-            for product in response.data["results"]
-        ]
+        titles = [product["title"] for product in response.data["results"]]
 
         self.assertIn(
             "Cyberpunk 2077",

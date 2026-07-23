@@ -1,17 +1,16 @@
 from rest_framework import generics, status
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.permissions import IsAuthenticated
 
-from apps.orders.services import pay_order
+from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order
 from apps.orders.serializers import (
     MyOrderSerializer,
-    OrderSerializer,
     OrderPaymentSerializer,
+    OrderSerializer,
 )
-from apps.orders.exceptions import OrderPaymentError
-
+from apps.orders.services import pay_order
 
 
 class OrderCreateAPIView(generics.CreateAPIView):
@@ -29,7 +28,6 @@ class OrderCreateAPIView(generics.CreateAPIView):
 
 
 class OrderPayAPIView(APIView):
-
     def post(self, request, pk):
 
         try:
