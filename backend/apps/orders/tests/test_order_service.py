@@ -1,6 +1,8 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
@@ -69,49 +71,49 @@ class OrderServiceTests(TestCase):
             "Already paid",
         )
 
-    def test_pay_order_saves_payment_data(self):
+    def test_pay_order_persists_completed_sale_fields(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+        )
+        paid_at = timezone.now()
+
+        with patch(
+            "apps.orders.services.timezone.now",
+            return_value=paid_at,
+        ):
+            pay_order(order.id)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        payment = Payment.objects.get(
+            order=order,
+        )
+
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertEqual(order.price_paid, Decimal("59.99"))
+        self.assertEqual(order.paid_at, paid_at)
+        self.assertEqual(order.license_key, self.license_key)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
+        self.assertEqual(self.license_key.sold_at, paid_at)
+        self.assertEqual(payment.status, Payment.Status.PAID)
+        self.assertEqual(payment.amount, Decimal("59.99"))
+        self.assertEqual(payment.paid_at, paid_at)
+
+    def test_price_paid_remains_unchanged_after_product_price_changes(self):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
         )
 
         pay_order(order.id)
+        order.refresh_from_db()
+        paid_price = order.price_paid
 
-        payment = Payment.objects.get(
-            order=order,
-        )
+        self.product.price = Decimal("79.99")
+        self.product.save()
+        order.refresh_from_db()
 
-        self.assertEqual(
-            payment.amount,
-            Decimal("59.99"),
-        )
-
-        self.assertIsNotNone(
-            payment.paid_at,
-        )
-
-    def test_payment_created_after_successful_payment(self):
-        order = Order.objects.create(
-            product=self.product,
-            email="test@test.com",
-        )
-
-        pay_order(order.id)
-
-        payment = Payment.objects.get(
-            order=order,
-        )
-
-        self.assertEqual(
-            payment.status,
-            Payment.Status.PAID,
-        )
-
-        self.assertEqual(
-            payment.amount,
-            Decimal(str(self.product.price)),
-        )
-
-        self.assertIsNotNone(
-            payment.paid_at,
-        )
+        self.assertEqual(paid_price, Decimal("59.99"))
+        self.assertEqual(order.price_paid, Decimal("59.99"))
+        self.assertEqual(order.product.price, Decimal("79.99"))

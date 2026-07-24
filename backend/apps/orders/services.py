@@ -26,18 +26,24 @@ def pay_order(order_id: int) -> Order:
     if not license_key:
         raise OrderPaymentError("No keys available")
 
+    paid_at = timezone.now()
+    price_paid = order.product.price
+
     license_key.status = LicenseKey.Status.SOLD
+    license_key.sold_at = paid_at
     license_key.save()
 
     order.license_key = license_key
     order.status = Order.Status.PAID
+    order.price_paid = price_paid
+    order.paid_at = paid_at
     order.save()
 
     Payment.objects.create(
         order=order,
         status=Payment.Status.PAID,
-        amount=order.product.price,
-        paid_at=timezone.now(),
+        amount=price_paid,
+        paid_at=paid_at,
     )
 
     return order
