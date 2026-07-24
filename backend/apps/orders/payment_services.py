@@ -8,6 +8,11 @@ from apps.orders.models import Order, Payment
 
 @transaction.atomic
 def create_payment(order: Order) -> Payment:
+    order = (
+        Order.objects.select_for_update()
+        .select_related("product")
+        .get(pk=order.pk)
+    )
 
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Order already paid")

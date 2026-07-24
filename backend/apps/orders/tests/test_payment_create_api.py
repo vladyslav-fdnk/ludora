@@ -101,6 +101,10 @@ class PaymentCreateAPIViewTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"error": "Payment already in progress"},
+        )
         self.assertEqual(Payment.objects.filter(order=self.order).count(), 1)
 
     def test_second_payment_is_rejected_when_pending_payment_exists(self):
@@ -118,6 +122,10 @@ class PaymentCreateAPIViewTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"error": "Payment already in progress"},
+        )
         self.assertEqual(Payment.objects.filter(order=self.order).count(), 1)
 
     def test_payment_is_rejected_when_order_is_already_paid(self):
@@ -132,6 +140,10 @@ class PaymentCreateAPIViewTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"error": "Order already paid"},
+        )
         self.assertFalse(Payment.objects.filter(order=self.order).exists())
 
     def test_payment_retry_is_allowed_after_failed_payment(self):
