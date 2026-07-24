@@ -1,0 +1,87 @@
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
+
+from apps.games.models import Platform, Product
+from apps.orders.models import Order, Payment
+
+User = get_user_model()
+
+
+class PaymentCreateAPIViewTests(APITestCase):
+    def setUp(self):
+        self.platform = Platform.objects.create(
+            name="Steam",
+        )
+        self.product = Product.objects.create(
+            title="Cyberpunk 2077",
+            slug="cyberpunk-2077",
+            price=59.99,
+            product_type="GAME",
+            platform=self.platform,
+        )
+        self.user = User.objects.create_user(
+            username="user1",
+            email="user1@test.com",
+            password="password123",
+        )
+        self.other_user = User.objects.create_user(
+            username="user2",
+            email="user2@test.com",
+            password="password123",
+        )
+        self.order = Order.objects.create(
+            product=self.product,
+            user=self.user,
+            email=self.user.email,
+        )
+        self.url = reverse("orders:payment-create")
+
+    def test_anonymous_user_cannot_create_payment(self):
+        response = self.client.post(
+            self.url,
+            {"order": self.order.id},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+        self.assertFalse(Payment.objects.exists())
+
+    def test_user_cannot_create_payment_for_another_users_order(self):
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.post(
+            self.url,
+            {"order": self.order.id},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertFalse(Payment.objects.exists())
+
+    def test_owner_can_create_payment(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            self.url,
+            {"order": self.order.id},
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_201_CREATED,
+        )
+        self.assertTrue(
+            Payment.objects.filter(
+                id=response.data["id"],
+                order=self.order,
+            ).exists()
+        )

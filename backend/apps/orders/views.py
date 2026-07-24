@@ -28,6 +28,10 @@ class OrderCreateAPIView(generics.CreateAPIView):
 
 
 class OrderPayAPIView(APIView):
+    permission_classes = [
+        IsAuthenticated,
+    ]
+
     def post(self, request, pk):
 
         try:

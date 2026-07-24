@@ -137,3 +137,24 @@ class OrderTests(APITestCase):
             response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
+
+    def test_anonymous_user_cannot_pay_order(self):
+        order = Order.objects.create(
+            product=self.product,
+            user=self.user,
+            email=self.user.email,
+        )
+
+        response = self.client.post(
+            reverse(
+                "orders:order-pay",
+                kwargs={
+                    "pk": order.id,
+                },
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
