@@ -20,6 +20,7 @@ class OrderTests(APITestCase):
             price=59.99,
             product_type="GAME",
             platform=self.platform,
+            is_active=True,
         )
 
         self.license_key = LicenseKey.objects.create(
@@ -53,7 +54,31 @@ class OrderTests(APITestCase):
 
         order = Order.objects.get(id=response.data["id"])
 
+        self.assertEqual(order.product, self.product)
         self.assertIsNone(order.license_key)
+
+    def test_cannot_create_order_for_inactive_product(self):
+        inactive_product = Product.objects.create(
+            title="Inactive Game",
+            slug="inactive-game",
+            price=29.99,
+            product_type="GAME",
+            platform=self.platform,
+            is_active=False,
+        )
+
+        response = self.client.post(
+            "/api/orders/",
+            {
+                "email": "buyer@test.com",
+                "product": inactive_product.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("product", response.data)
+        self.assertEqual(Order.objects.count(), 0)
 
     def test_authenticated_user_is_assigned_to_order(self):
         response = self.client.post(

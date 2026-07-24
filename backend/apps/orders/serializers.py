@@ -5,7 +5,9 @@ from apps.orders.models import Order, Payment
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    product = serializers.PrimaryKeyRelatedField(queryset=Product.objects.all())
+    product = serializers.PrimaryKeyRelatedField(
+        queryset=Product.objects.filter(is_active=True),
+    )
 
     class Meta:
         model = Order
