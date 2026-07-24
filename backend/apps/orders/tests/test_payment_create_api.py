@@ -22,12 +22,10 @@ class PaymentCreateAPIViewTests(APITestCase):
             platform=self.platform,
         )
         self.user = User.objects.create_user(
-            username="user1",
             email="user1@test.com",
             password="password123",
         )
         self.other_user = User.objects.create_user(
-            username="user2",
             email="user2@test.com",
             password="password123",
         )

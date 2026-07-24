@@ -51,7 +51,7 @@ class ProductUpdateAPIViewTests(APITestCase):
     def test_admin_can_update_product(self):
 
         admin = User.objects.create_superuser(
-            username="admin",
+            email="admin@example.com",
             password="password123",
         )
 

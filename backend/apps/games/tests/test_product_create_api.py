@@ -16,12 +16,12 @@ class ProductCreateAPIViewTests(APITestCase):
         )
 
         self.admin = User.objects.create_superuser(
-            username="admin",
+            email="admin@example.com",
             password="password123",
         )
 
         self.user = User.objects.create_user(
-            username="user",
+            email="user@example.com",
             password="password123",
         )
 

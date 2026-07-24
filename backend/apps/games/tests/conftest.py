@@ -29,6 +29,6 @@ def product(platform):
 @pytest.fixture
 def admin_user():
     return User.objects.create_superuser(
-        username="admin",
+        email="admin@example.com",
         password="password123",
     )

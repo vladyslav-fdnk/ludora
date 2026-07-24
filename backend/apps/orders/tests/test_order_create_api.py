@@ -29,7 +29,6 @@ class OrderTests(APITestCase):
         )
 
         self.user = User.objects.create_user(
-            username="buyer",
             email="buyer@test.com",
             password="password123",
         )

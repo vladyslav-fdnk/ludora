@@ -46,7 +46,7 @@ class ProductDeleteAPIViewTests(APITestCase):
 
     def test_admin_can_delete_product(self):
         admin = User.objects.create_superuser(
-            username="admin",
+            email="admin@example.com",
             password="password123",
         )
 
@@ -77,7 +77,7 @@ class ProductDeleteAPIViewTests(APITestCase):
 
         User = get_user_model()
         admin = User.objects.create_superuser(
-            username="admin",
+            email="another-admin@example.com",
             password="password123",
         )
 
