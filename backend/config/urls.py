@@ -1,3 +1,4 @@
+from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import (
     SpectacularAPIView,
@@ -5,6 +6,8 @@ from drf_spectacular.views import (
 )
 
 urlpatterns = [
+    path("admin/", admin.site.urls),  # ← добавить
+
     path("api/", include("apps.games.urls")),
     path("api/orders/", include("apps.orders.urls")),
     path(
