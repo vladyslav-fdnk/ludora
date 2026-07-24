@@ -1,4 +1,4 @@
-"""Django settings for the Game Key Store backend.
+"""Django settings for the Ludora Store backend.
 
 All environment-specific values are read from environment variables so the
 same codebase runs unchanged locally, in Docker, and in production. See
@@ -10,27 +10,30 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get(
+SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
     "django-insecure-fallback-key",
 )
-DEBUG = os.environ.get("DJANGO_DEBUG", "False") == "True"
-ALLOWED_HOSTS = [
-    host.strip() for host in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",") if host.strip()
-]
+DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
+
+def get_list_env(name: str) -> list[str]:
+    value = os.getenv(name, "")
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+ALLOWED_HOSTS = get_list_env("DJANGO_ALLOWED_HOSTS")
 
 INSTALLED_APPS = [
+    # Third-party apps
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # Project apps. Each one currently only defines its AppConfig —
-    # no models/views/serializers exist yet.
-    "rest_framework",
     "django_filters",
+    "rest_framework",
     "drf_spectacular",
+    # Local apps
     "apps.authentication.apps.AuthenticationConfig",
     "apps.games.apps.GamesConfig",
     "apps.users.apps.UsersConfig",
@@ -72,11 +75,11 @@ ASGI_APPLICATION = "config.asgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB", "game_key_store"),
-        "USER": os.environ.get("POSTGRES_USER", "game_key_store"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
-        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
-        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        "NAME": os.getenv("POSTGRES_DB", "ludora_store"),
+        "USER": os.getenv("POSTGRES_USER", "ludora_store"),
+        "PASSWORD": os.getenv("POSTGRES_PASSWORD", ""),
+        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
+        "PORT": os.getenv("POSTGRES_PORT", "5432"),
     }
 }
 
@@ -96,31 +99,36 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# TODO: set AUTH_USER_MODEL = "users.User" once a custom user model exists.
-# TODO: add REST_FRAMEWORK settings once Django REST Framework is introduced.
-# TODO: add CELERY_* / CACHES (Redis) settings once Celery is introduced.
-
 
 REST_FRAMEWORK = {
-    "DEFAULT_SCHEMA_CLASS": ("drf_spectacular.openapi.AutoSchema"),
-    "DEFAULT_FILTER_BACKENDS": [
-        "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.SearchFilter",
-    ],
-    "DEFAULT_PAGINATION_CLASS": ("rest_framework.pagination.PageNumberPagination"),
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ),
+
+    "DEFAULT_PERMISSION_CLASSES": (
+        "rest_framework.permissions.AllowAny",
+    ),
+
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.SearchFilter",
+    ),
+
+    "DEFAULT_PAGINATION_CLASS": (
+        "rest_framework.pagination.PageNumberPagination"
+    ),
+
     "PAGE_SIZE": 10,
 }
 
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "Ludora Game Store API",
-    "DESCRIPTION": (
-        "API for digital game keys marketplace. Users can browse, search and manage products."
-    ),
+    "TITLE": "Ludora API",
+    "DESCRIPTION": "REST API for the Ludora digital products store.",
     "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
 }
 
 AUTH_USER_MODEL = "users.User"
