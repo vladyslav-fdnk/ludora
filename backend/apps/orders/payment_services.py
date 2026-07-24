@@ -12,6 +12,14 @@ def create_payment(order: Order) -> Payment:
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Order already paid")
 
+    if order.payments.filter(
+        status__in=[
+            Payment.Status.CREATED,
+            Payment.Status.PENDING,
+        ]
+    ).exists():
+        raise OrderPaymentError("Payment already in progress")
+
     payment = Payment.objects.create(
         order=order,
         status=Payment.Status.CREATED,

@@ -3,6 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order
 from apps.orders.payment_services import create_payment
 from apps.orders.serializers import PaymentSerializer
@@ -28,7 +29,13 @@ class PaymentCreateAPIView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        payment = create_payment(order)
+        try:
+            payment = create_payment(order)
+        except OrderPaymentError as error:
+            return Response(
+                {"error": str(error)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         serializer = PaymentSerializer(payment)
 
