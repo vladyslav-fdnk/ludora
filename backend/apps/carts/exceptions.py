@@ -13,3 +13,6 @@ class ProductUnavailableError(CartError):
 class CartConflictError(CartError):
     status_code = 409
 
+
+class CartItemNotFoundError(CartError):
+    status_code = 404

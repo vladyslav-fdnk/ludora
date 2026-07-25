@@ -4,8 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.carts.exceptions import CartError
-from apps.carts.models import CartItem
+from apps.carts.exceptions import CartError, CartItemNotFoundError
 from apps.carts.serializers import (
     AddCartItemSerializer,
     CartItemSerializer,
@@ -16,7 +15,9 @@ from apps.carts.serializers import (
 from apps.carts.services import (
     add_cart_item,
     checkout_cart,
+    clear_cart,
     get_or_create_cart,
+    remove_cart_item,
     set_cart_item_quantity,
 )
 from apps.orders.serializers import ErrorResponseSerializer
@@ -66,27 +67,24 @@ class CartItemCreateAPIView(APIView):
 class CartItemDetailAPIView(APIView):
     permission_classes = (IsAuthenticated,)
 
-    def _item(self, request, pk):
-        return (
-            CartItem.objects.filter(pk=pk, cart__user=request.user)
-            .select_related("product", "product__platform")
-            .first()
-        )
-
     @extend_schema(request=UpdateCartItemSerializer, responses={200: CartItemSerializer})
     def patch(self, request, pk):
         serializer = UpdateCartItemSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        if self._item(request, pk) is None:
-            return Response({"error": "Cart item not found."}, status=404)
-        item = set_cart_item_quantity(request.user, pk, serializer.validated_data["quantity"])
+        try:
+            item = set_cart_item_quantity(
+                request.user, pk, serializer.validated_data["quantity"]
+            )
+        except CartItemNotFoundError as error:
+            return Response({"error": str(error)}, status=error.status_code)
         return Response(CartItemSerializer(item).data)
 
     @extend_schema(responses={204: None})
     def delete(self, request, pk):
-        deleted, _ = CartItem.objects.filter(pk=pk, cart__user=request.user).delete()
-        if not deleted:
-            return Response({"error": "Cart item not found."}, status=404)
+        try:
+            remove_cart_item(request.user, pk)
+        except CartItemNotFoundError as error:
+            return Response({"error": str(error)}, status=error.status_code)
         return Response(status=204)
 
 
@@ -95,8 +93,7 @@ class CartClearAPIView(APIView):
 
     @extend_schema(responses={204: None})
     def delete(self, request):
-        cart = get_or_create_cart(request.user)
-        cart.items.all().delete()
+        clear_cart(request.user)
         return Response(status=204)
 
 
@@ -121,4 +118,3 @@ class CartCheckoutAPIView(APIView):
             CheckoutResponseSerializer(order).data,
             status=status.HTTP_201_CREATED,
         )
-

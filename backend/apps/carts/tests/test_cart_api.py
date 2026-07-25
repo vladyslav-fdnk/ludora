@@ -1,14 +1,18 @@
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from threading import Barrier
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, connection, transaction
-from django.test import TestCase
+from django.db import IntegrityError, close_old_connections, connection, transaction
+from django.test import TestCase, TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from apps.carts.exceptions import CartItemNotFoundError, EmptyCartError
 from apps.carts.models import Cart, CartItem
+from apps.carts.services import add_cart_item, checkout_cart, set_cart_item_quantity
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import Order, OrderItem, Payment
 
@@ -126,6 +130,37 @@ class CartAPITests(APITestCase):
         self.assertEqual(self.client.delete("/api/cart/clear/").status_code, 204)
         self.assertFalse(Cart.objects.get(user=self.user).items.exists())
         self.assertEqual(CartItem.objects.get(pk=item.pk).quantity, 2)
+
+    @patch("apps.carts.views.set_cart_item_quantity")
+    def test_stale_item_update_returns_stable_404(self, update_quantity):
+        update_quantity.side_effect = CartItemNotFoundError("Cart item not found.")
+
+        response = self.client.patch(
+            "/api/cart/items/999/",
+            {"quantity": 2},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"error": "Cart item not found."})
+
+    def test_nonexistent_item_update_returns_404(self):
+        response = self.client.patch(
+            "/api/cart/items/999999/",
+            {"quantity": 2},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertEqual(response.data, {"error": "Cart item not found."})
+
+    def test_invalid_update_quantity_remains_validation_error(self):
+        response = self.client.patch(
+            "/api/cart/items/999999/",
+            {"quantity": 0},
+            format="json",
+        )
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("quantity", response.data)
 
     def test_cart_response_has_bounded_queries(self):
         self.add()
@@ -257,3 +292,84 @@ class CartConstraintTests(TestCase):
                 quantity=1,
                 unit_price=self.product.price,
             )
+
+
+@skipUnlessDBFeature("has_select_for_update")
+class CartConcurrencyTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.user = User.objects.create_user(email="concurrent@example.com")
+        self.platform = Platform.objects.create(
+            name="Concurrent Steam", slug="concurrent-steam"
+        )
+        self.product = Product.objects.create(
+            title="Concurrent Game",
+            slug="concurrent-game",
+            price=Decimal("10.00"),
+            product_type=Product.ProductType.GAME,
+            platform=self.platform,
+        )
+        self.cart = Cart.objects.create(user=self.user)
+        self.item = CartItem.objects.create(
+            cart=self.cart,
+            product=self.product,
+            quantity=1,
+        )
+
+    def _run_pair(self, first, second):
+        barrier = Barrier(2)
+
+        def run(operation):
+            close_old_connections()
+            try:
+                user = User.objects.get(pk=self.user.pk)
+                barrier.wait()
+                return operation(user)
+            except (EmptyCartError, CartItemNotFoundError) as error:
+                return error
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(run, operation) for operation in (first, second)]
+            return [future.result(timeout=10) for future in futures]
+
+    def test_checkout_versus_checkout_creates_exactly_one_order(self):
+        results = self._run_pair(checkout_cart, checkout_cart)
+
+        self.assertEqual(sum(isinstance(result, Order) for result in results), 1)
+        self.assertEqual(sum(isinstance(result, EmptyCartError) for result in results), 1)
+        self.assertEqual(Order.objects.count(), 1)
+        self.assertFalse(CartItem.objects.exists())
+
+    def test_quantity_update_versus_checkout_has_no_500_or_lost_state(self):
+        results = self._run_pair(
+            lambda user: set_cart_item_quantity(user, self.item.pk, 3),
+            checkout_cart,
+        )
+
+        self.assertEqual(Order.objects.count(), 1)
+        order_quantity = OrderItem.objects.get(order=Order.objects.get()).quantity
+        self.assertIn(order_quantity, (1, 3))
+        if order_quantity == 1:
+            self.assertTrue(
+                any(isinstance(result, CartItemNotFoundError) for result in results)
+            )
+
+    def test_add_item_versus_checkout_does_not_lose_quantity(self):
+        self._run_pair(
+            lambda user: add_cart_item(user, self.product.pk, 1),
+            checkout_cart,
+        )
+
+        ordered_quantity = sum(
+            OrderItem.objects.values_list("quantity", flat=True),
+            start=0,
+        )
+        cart_quantity = sum(
+            CartItem.objects.values_list("quantity", flat=True),
+            start=0,
+        )
+        self.assertEqual(Order.objects.count(), 1)
+        self.assertEqual(ordered_quantity + cart_quantity, 2)

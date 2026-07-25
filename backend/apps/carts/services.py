@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction
 
 from apps.carts.exceptions import (
     CartConflictError,
+    CartItemNotFoundError,
     EmptyCartError,
     ProductUnavailableError,
 )
@@ -53,15 +54,38 @@ def add_cart_item(user, product: int, quantity: int) -> CartItem:
 
 @transaction.atomic
 def set_cart_item_quantity(user, item_id: int, quantity: int) -> CartItem:
-    item = (
-        CartItem.objects.select_for_update()
-        .select_related("product")
-        .get(pk=item_id, cart__user=user)
-    )
+    cart = Cart.objects.select_for_update().filter(user=user).first()
+    if cart is None:
+        raise CartItemNotFoundError("Cart item not found.")
+    try:
+        item = (
+            CartItem.objects.select_for_update()
+            .select_related("product")
+            .get(pk=item_id, cart=cart)
+        )
+    except CartItem.DoesNotExist as exc:
+        raise CartItemNotFoundError("Cart item not found.") from exc
     item.quantity = quantity
     item.full_clean()
     item.save(update_fields=("quantity", "updated_at"))
     return item
+
+
+@transaction.atomic
+def remove_cart_item(user, item_id: int) -> None:
+    cart = Cart.objects.select_for_update().filter(user=user).first()
+    if cart is None:
+        raise CartItemNotFoundError("Cart item not found.")
+    deleted, _ = CartItem.objects.filter(pk=item_id, cart=cart).delete()
+    if not deleted:
+        raise CartItemNotFoundError("Cart item not found.")
+
+
+@transaction.atomic
+def clear_cart(user) -> None:
+    cart = get_or_create_cart(user)
+    cart = Cart.objects.select_for_update().get(pk=cart.pk)
+    CartItem.objects.filter(cart=cart).delete()
 
 
 @transaction.atomic
