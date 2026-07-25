@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     # Local apps
     "apps.authentication.apps.AuthenticationConfig",
+    "apps.carts.apps.CartsConfig",
     "apps.games.apps.GamesConfig",
     "apps.users.apps.UsersConfig",
     "apps.orders.apps.OrdersConfig",
