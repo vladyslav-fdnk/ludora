@@ -5,6 +5,14 @@ description = "Telegram Game Key Store — Aiogram bot"
 requires-python = ">=3.13"
 dependencies = [
     "aiogram>=3.13",
+    "httpx>=0.28",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "ruff>=0.9",
 ]
 
 # This is an application, not a distributable library, so it should not be
@@ -18,3 +26,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -23,8 +23,8 @@ services:
   bot:
     build: ./bot
     env_file: .env
-    # If BOT_TOKEN is empty, app/main.py logs a warning and exits 0
-    # instead of crash-looping.
+    environment:
+      BOT_BACKEND_BASE_URL: http://backend:8000
     depends_on:
       - backend
     volumes:

@@ -1,3 +1,4 @@
-# TODO: aiogram Router modules go here (e.g. start.py, catalog.py, orders.py).
-# Each router will be imported and registered in app/main.py via
-# dp.include_router(...).
+from .catalogue import router as catalogue_router
+from .start import router as start_router
+
+__all__ = ["catalogue_router", "start_router"]

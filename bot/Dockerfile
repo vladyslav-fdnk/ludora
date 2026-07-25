@@ -15,4 +15,4 @@ RUN uv sync --no-install-project
 
 COPY . .
 
-CMD ["uv", "run", "python", "app/main.py"]
+CMD ["uv", "run", "python", "-m", "app.main"]
