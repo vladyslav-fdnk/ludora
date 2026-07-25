@@ -26,6 +26,10 @@ class ProductDeleteAPIViewTests(APITestCase):
             price=Decimal("59.99"),
             is_active=True,
         )
+        self.user = User.objects.create_user(
+            email="user@example.com",
+            password="password123",
+        )
 
     def test_anonymous_user_cannot_delete_product(self):
         url = reverse(
@@ -44,14 +48,15 @@ class ProductDeleteAPIViewTests(APITestCase):
 
         self.assertTrue(Product.objects.filter(id=self.product.id).exists())
 
-    def test_admin_can_delete_product(self):
-        admin = User.objects.create_superuser(
-            email="admin@example.com",
+    def test_staff_user_can_delete_product(self):
+        staff_user = User.objects.create_user(
+            email="staff@example.com",
             password="password123",
+            is_staff=True,
         )
 
         self.client.force_authenticate(
-            user=admin,
+            user=staff_user,
         )
 
         url = reverse(
@@ -71,6 +76,20 @@ class ProductDeleteAPIViewTests(APITestCase):
         self.product.refresh_from_db()
 
         self.assertFalse(self.product.is_active)
+
+    def test_authenticated_non_staff_user_cannot_delete_product(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.delete(
+            reverse(
+                "games:product-delete",
+                kwargs={"pk": self.product.id},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.product.refresh_from_db()
+        self.assertTrue(self.product.is_active)
 
     def test_deleted_product_not_visible_in_catalog(self):
         from django.contrib.auth import get_user_model

@@ -55,6 +55,8 @@ class OrderTests(APITestCase):
 
         self.assertEqual(order.product, self.product)
         self.assertIsNone(order.license_key)
+        self.assertIsNone(response.data["license_key"])
+        self.assertNotIn(self.license_key.value, str(response.data))
 
     def test_cannot_create_order_for_inactive_product(self):
         inactive_product = Product.objects.create(

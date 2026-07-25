@@ -80,6 +80,29 @@ class ProductCreateAPIViewTests(APITestCase):
 
         self.assertTrue(Product.objects.filter(slug="elden-ring").exists())
 
+    def test_staff_user_can_create_product(self):
+        staff_user = User.objects.create_user(
+            email="staff@example.com",
+            password="password123",
+            is_staff=True,
+        )
+        self.client.force_authenticate(user=staff_user)
+
+        response = self.client.post(
+            reverse("games:product-create"),
+            {
+                "title": "Staff Game",
+                "slug": "staff-game",
+                "product_type": "GAME",
+                "platform": self.platform.id,
+                "price": "25.00",
+                "is_active": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
     def test_admin_cannot_create_product_without_price(self):
         self.client.force_authenticate(
             user=self.admin,

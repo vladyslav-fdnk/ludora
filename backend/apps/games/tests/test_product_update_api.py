@@ -26,6 +26,10 @@ class ProductUpdateAPIViewTests(APITestCase):
             price=Decimal("59.99"),
             is_active=True,
         )
+        self.user = User.objects.create_user(
+            email="user@example.com",
+            password="password123",
+        )
 
     def test_anonymous_user_cannot_update_product(self):
         url = reverse(
@@ -48,15 +52,15 @@ class ProductUpdateAPIViewTests(APITestCase):
             status.HTTP_401_UNAUTHORIZED,
         )
 
-    def test_admin_can_update_product(self):
-
-        admin = User.objects.create_superuser(
-            email="admin@example.com",
+    def test_staff_user_can_update_product(self):
+        staff_user = User.objects.create_user(
+            email="staff@example.com",
             password="password123",
+            is_staff=True,
         )
 
         self.client.force_authenticate(
-            user=admin,
+            user=staff_user,
         )
 
         url = reverse(
@@ -85,3 +89,19 @@ class ProductUpdateAPIViewTests(APITestCase):
             str(self.product.price),
             "39.99",
         )
+
+    def test_authenticated_non_staff_user_cannot_update_product(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.patch(
+            reverse(
+                "games:product-update",
+                kwargs={"pk": self.product.id},
+            ),
+            {"price": "10.00"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+        self.product.refresh_from_db()
+        self.assertEqual(str(self.product.price), "59.99")

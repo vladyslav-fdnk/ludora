@@ -1,7 +1,6 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics
 from rest_framework.filters import OrderingFilter, SearchFilter
-from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 
 from apps.games.models import Product
@@ -10,6 +9,7 @@ from apps.games.serializers import (
     ProductListSerializer,
     ProductWriteSerializer,
 )
+from apps.permissions import IsStaffUser
 
 
 class ProductListAPIView(generics.ListAPIView):
@@ -55,19 +55,19 @@ class ProductDetailAPIView(generics.RetrieveAPIView):
 class ProductCreateAPIView(generics.CreateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductWriteSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsStaffUser]
 
 
 class ProductUpdateAPIView(generics.UpdateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductWriteSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsStaffUser]
 
 
 class ProductDeleteAPIView(generics.UpdateAPIView):
     queryset = Product.objects.all()
     serializer_class = ProductDetailSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsStaffUser]
 
     def delete(self, request, *args, **kwargs):
         product = self.get_object()

@@ -53,6 +53,7 @@ class OrderTests(APITestCase):
         response = self.client.post(f"/api/orders/{order.id}/pay/")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["license_key"], self.license_key.value)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -135,6 +136,7 @@ class OrderTests(APITestCase):
             response.status_code,
             status.HTTP_404_NOT_FOUND,
         )
+        self.assertNotIn(self.license_key.value, str(response.data))
 
     def test_anonymous_user_cannot_pay_order(self):
         order = Order.objects.create(
