@@ -87,6 +87,25 @@ class Order(models.Model):
         blank=True,
     )
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(source="DIRECT")
+                | models.Q(product__isnull=True),
+                name="cart_order_has_no_legacy_product",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(total_price__gte=0)
+                | models.Q(total_price__isnull=True),
+                name="order_total_price_nonnegative",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(price_paid__gte=0)
+                | models.Q(price_paid__isnull=True),
+                name="order_price_paid_nonnegative",
+            ),
+        ]
+
     def save(self, *args, **kwargs):
         if not self.order_number:
             self.order_number = f"LUD-{uuid.uuid4().hex[:10].upper()}"
@@ -178,6 +197,14 @@ class Payment(models.Model):
         null=True,
         blank=True,
     )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="payment_amount_nonnegative",
+            ),
+        ]
 
     def __str__(self):
         return f"Payment #{self.id} - {self.status}"
