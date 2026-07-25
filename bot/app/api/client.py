@@ -12,11 +12,15 @@ from .exceptions import (
     AuthenticationRequired,
     BackendTimeout,
     BackendUnavailable,
+    Conflict,
     InvalidResponse,
+    PermissionDenied,
     ProductNotFound,
+    ResourceNotFound,
     UnexpectedAPIStatus,
+    ValidationFailed,
 )
-from .schemas import Product, ProductPage
+from .schemas import Cart, CartItem, CheckoutOrder, Product, ProductPage
 
 
 class BackendClient:
@@ -72,6 +76,48 @@ class BackendClient:
         self._raise_for_status(response)
         return Product.from_mapping(self._json(response))
 
+    async def get_cart(self, telegram_id: int) -> Cart:
+        return Cart.from_mapping(
+            await self._authenticated_json("GET", "api/cart/", telegram_id)
+        )
+
+    async def add_cart_item(
+        self, telegram_id: int, product_id: int, quantity: int = 1
+    ) -> CartItem:
+        data = await self._authenticated_json(
+            "POST",
+            "api/cart/items/",
+            telegram_id,
+            json={"product": product_id, "quantity": quantity},
+        )
+        return CartItem.from_mapping(data)
+
+    async def update_cart_item(
+        self, telegram_id: int, item_id: int, quantity: int
+    ) -> CartItem:
+        data = await self._authenticated_json(
+            "PATCH",
+            f"api/cart/items/{item_id}/",
+            telegram_id,
+            json={"quantity": quantity},
+        )
+        return CartItem.from_mapping(data)
+
+    async def remove_cart_item(self, telegram_id: int, item_id: int) -> None:
+        await self._authenticated_json(
+            "DELETE", f"api/cart/items/{item_id}/", telegram_id, expect_json=False
+        )
+
+    async def clear_cart(self, telegram_id: int) -> None:
+        await self._authenticated_json(
+            "DELETE", "api/cart/clear/", telegram_id, expect_json=False
+        )
+
+    async def checkout_cart(self, telegram_id: int) -> CheckoutOrder:
+        return CheckoutOrder.from_mapping(
+            await self._authenticated_json("POST", "api/cart/checkout/", telegram_id)
+        )
+
     async def close(self) -> None:
         await self._client.aclose()
 
@@ -80,6 +126,9 @@ class BackendClient:
         method: str,
         path: str,
         telegram_id: int,
+        *,
+        json: dict[str, int] | None = None,
+        expect_json: bool = True,
     ) -> Any:
         if self._token_storage is None:
             raise AuthenticationRequired
@@ -91,22 +140,24 @@ class BackendClient:
             method,
             path,
             headers={"Authorization": f"Bearer {tokens.access}"},
+            json=json,
         )
         if response.status_code != 401:
             self._raise_for_status(response)
-            return self._json(response)
+            return self._json(response) if expect_json else None
 
         refreshed = await self._refresh(tokens.refresh, telegram_id)
         response = await self._send(
             method,
             path,
             headers={"Authorization": f"Bearer {refreshed.access}"},
+            json=json,
         )
         if response.status_code == 401:
             await self._token_storage.delete(telegram_id)
             raise AuthenticationRequired
         self._raise_for_status(response)
-        return self._json(response)
+        return self._json(response) if expect_json else None
 
     async def _refresh(self, refresh_token: str, telegram_id: int) -> AuthTokens:
         response = await self._send(
@@ -149,6 +200,14 @@ class BackendClient:
 
     @staticmethod
     def _raise_for_status(response: httpx.Response) -> None:
+        if response.status_code == 400:
+            raise ValidationFailed
+        if response.status_code == 404:
+            raise ResourceNotFound
+        if response.status_code == 409:
+            raise Conflict
+        if response.status_code == 403:
+            raise PermissionDenied
         if not 200 <= response.status_code < 300:
             raise UnexpectedAPIStatus(response.status_code)
 

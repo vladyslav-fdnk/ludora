@@ -17,3 +17,18 @@ class ProductCallback(CallbackData, prefix="prd"):
 
 class LanguageCallback(CallbackData, prefix="lng"):
     language: Literal["en", "ru"]
+
+
+class AddCartCallback(CallbackData, prefix="add"):
+    product_id: PositiveInt
+
+
+class CartItemCallback(CallbackData, prefix="cit"):
+    action: Literal["inc", "dec", "remove"]
+    item_id: PositiveInt
+    owner_id: PositiveInt
+
+
+class CartActionCallback(CallbackData, prefix="crt"):
+    action: Literal["clear", "clear_yes", "checkout", "checkout_yes"]
+    owner_id: PositiveInt

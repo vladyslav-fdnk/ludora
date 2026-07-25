@@ -87,7 +87,9 @@ async def product_detail(
         if callback.message:
             await callback.message.edit_text(
                 format_product(product, language, translator),
-                reply_markup=product_keyboard(callback_data.page, language, translator),
+                reply_markup=product_keyboard(
+                    callback_data.page, language, translator, product.id
+                ),
             )
     except APIError as error:
         await show_error(callback, error, language, translator)

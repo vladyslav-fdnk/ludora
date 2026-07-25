@@ -21,6 +21,22 @@ class ProductNotFound(APIError):
     """The requested product is unavailable."""
 
 
+class ResourceNotFound(APIError):
+    """An owned backend resource does not exist."""
+
+
+class ValidationFailed(APIError):
+    """The backend rejected user-controlled input."""
+
+
+class Conflict(APIError):
+    """The requested state transition conflicts with current state."""
+
+
+class PermissionDenied(APIError):
+    """The authenticated user may not access the requested resource."""
+
+
 class UnexpectedAPIStatus(APIError):
     """The backend returned an unexpected HTTP status."""
 
