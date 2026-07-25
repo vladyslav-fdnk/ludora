@@ -51,7 +51,6 @@ class CartItem(models.Model):
                 name="cart_item_quantity_between_1_and_99",
             ),
         ]
-        indexes = [models.Index(fields=("cart", "product"), name="cart_item_lookup_idx")]
 
     @property
     def line_total(self) -> Decimal:
@@ -59,4 +58,3 @@ class CartItem(models.Model):
 
     def __str__(self) -> str:
         return f"{self.product} × {self.quantity}"
-
