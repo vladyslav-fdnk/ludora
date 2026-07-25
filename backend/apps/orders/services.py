@@ -13,6 +13,8 @@ def pay_order(order_id: int) -> Order:
 
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Already paid")
+    if order.source == Order.Source.CART:
+        raise OrderPaymentError("Cart orders are not payable in this stage")
 
     license_key = (
         LicenseKey.objects.select_for_update()

@@ -9,13 +9,15 @@ from apps.orders.models import Order, Payment
 @transaction.atomic
 def create_payment(order: Order) -> Payment:
     order = (
-        Order.objects.select_for_update()
+        Order.objects.select_for_update(of=("self",))
         .select_related("product")
         .get(pk=order.pk)
     )
 
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Order already paid")
+    if order.source == Order.Source.CART:
+        raise OrderPaymentError("Cart orders are not payable in this stage")
 
     if order.payments.filter(
         status__in=[

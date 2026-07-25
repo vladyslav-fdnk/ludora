@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.games.models import Product
-from apps.orders.models import Order, Payment
+from apps.orders.models import Order, OrderItem, Payment
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -34,6 +34,50 @@ class OrderSerializer(serializers.ModelSerializer):
             "license_key",
             "created_at",
         ]
+
+    def create(self, validated_data):
+        order = super().create(validated_data)
+        order.total_price = order.product.price
+        order.save(update_fields=("total_price",))
+        OrderItem.objects.create(
+            order=order,
+            product=order.product,
+            product_title=order.product.title,
+            quantity=1,
+            unit_price=order.product.price,
+        )
+        return order
+
+
+class OrderItemSerializer(serializers.ModelSerializer):
+    line_total = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = OrderItem
+        fields = (
+            "product",
+            "product_title",
+            "quantity",
+            "unit_price",
+            "line_total",
+        )
+
+
+class CheckoutOrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "order_number",
+            "status",
+            "total_price",
+            "items",
+            "created_at",
+        )
 
 
 class OrderPaymentSerializer(serializers.ModelSerializer):
