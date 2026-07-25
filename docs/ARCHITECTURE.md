@@ -416,7 +416,7 @@ The following limitations are visible in the current repository:
 - no inventory reservation timeout or checkout reservation lifecycle;
 - no email notification or bot-based license delivery;
 - no production deployment configuration or automated deployment pipeline;
-- the existing GitHub Actions workflow checks only the backend, not the bot;
+- the GitHub Actions workflow validates the backend and bot independently;
 - no application monitoring, tracing, or structured observability stack;
 - no explicit API rate limiting.
 
@@ -439,7 +439,7 @@ fulfilment messages.
 The admin could gain inventory summaries, payment diagnostics, and guarded order-support actions. Refund and cancellation workflows would require explicit state transitions and
 compensating inventory rules rather than direct field editing.
 
-The existing backend-focused CI workflow could expand to run bot tests, migration checks, and OpenAPI generation before building immutable images; a later CD stage could promote
+The CI workflow validates both applications, including migration consistency; it could later expand to generate OpenAPI before building immutable images, and a CD stage could promote
 those images. Production deployment would add secret management, TLS termination, static/media handling, database backup and restore procedures, and a production application
 server.
 
