@@ -9,7 +9,11 @@ from app.keyboards.callbacks import (
     CartActionCallback,
     CartItemCallback,
 )
-from app.keyboards.cart import cart_keyboard, confirmation_keyboard
+from app.keyboards.cart import (
+    added_to_cart_keyboard,
+    cart_keyboard,
+    confirmation_keyboard,
+)
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_cart, format_order
 
@@ -74,7 +78,8 @@ async def add_to_cart(
         )
         if callback.message:
             await callback.message.edit_text(
-                translator.get("cart.added", language)
+                translator.get("cart.added", language),
+                reply_markup=added_to_cart_keyboard(language, translator),
             )
     except APIError as error:
         await show_error(callback, error, language, translator)

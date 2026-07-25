@@ -3,7 +3,26 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.api.schemas import Cart
 from app.localization import Translator
 
-from .callbacks import CartActionCallback, CartItemCallback
+from .callbacks import CartActionCallback, CartItemCallback, CataloguePageCallback
+
+
+def added_to_cart_keyboard(
+    language: str, translator: Translator
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=translator.get("button.view_cart", language),
+                    callback_data="cart",
+                ),
+                InlineKeyboardButton(
+                    text=translator.get("button.continue_shopping", language),
+                    callback_data=CataloguePageCallback(page=1).pack(),
+                ),
+            ]
+        ]
+    )
 
 
 def cart_keyboard(

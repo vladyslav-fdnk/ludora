@@ -89,6 +89,10 @@ async def test_add_to_cart_callback():
     )
     auth.add_cart_item.assert_awaited_once_with(event.from_user, 1, 1)
     assert "Added" in event.message.edit_text.await_args.args[0]
+    markup = event.message.edit_text.await_args.kwargs["reply_markup"]
+    buttons = markup.inline_keyboard[0]
+    assert [button.text for button in buttons] == ["View cart", "Continue shopping"]
+    assert [button.callback_data for button in buttons] == ["cart", "cat:1"]
 
 
 @pytest.mark.parametrize(
