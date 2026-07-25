@@ -13,7 +13,13 @@ from app.localization import LanguagePreferences, Translator
 
 
 def user(language="en"):
-    return SimpleNamespace(id=123, language_code=language)
+    return SimpleNamespace(
+        id=123,
+        language_code=language,
+        username="tester",
+        first_name="Test",
+        last_name="User",
+    )
 
 
 def message(language="en"):
@@ -42,7 +48,9 @@ def products():
 
 async def test_start_detects_language_and_has_menu_actions():
     event = message("ru-RU")
-    await start_command(event, Translator(), LanguagePreferences())
+    auth = SimpleNamespace(synchronize=AsyncMock())
+    await start_command(event, Translator(), LanguagePreferences(), auth)
+    auth.synchronize.assert_awaited_once_with(event.from_user)
     text = event.answer.await_args.args[0]
     keyboard = event.answer.await_args.kwargs["reply_markup"]
     assert "Добро пожаловать" in text
@@ -55,7 +63,12 @@ async def test_start_detects_language_and_has_menu_actions():
 
 async def test_start_falls_back_to_english():
     event = message("pl")
-    await start_command(event, Translator(), LanguagePreferences())
+    await start_command(
+        event,
+        Translator(),
+        LanguagePreferences(),
+        SimpleNamespace(synchronize=AsyncMock()),
+    )
     assert "Welcome" in event.answer.await_args.args[0]
 
 

@@ -3,9 +3,12 @@ import logging
 from aiogram.types import CallbackQuery, Message, User
 
 from app.api.exceptions import (
+    AuthenticationFailed,
+    AuthenticationRequired,
     BackendTimeout,
     BackendUnavailable,
     InvalidResponse,
+    MissingTelegramUser,
     ProductNotFound,
     UnexpectedAPIStatus,
 )
@@ -30,6 +33,12 @@ def error_key(error: Exception) -> str:
         return "error.invalid_response"
     if isinstance(error, ProductNotFound):
         return "error.not_found"
+    if isinstance(error, MissingTelegramUser):
+        return "error.missing_user"
+    if isinstance(error, AuthenticationRequired):
+        return "error.auth_expired"
+    if isinstance(error, AuthenticationFailed):
+        return "error.auth_failed"
     return "error.internal"
 
 
@@ -45,7 +54,7 @@ async def show_error(
             exc_info=(type(error), error, error.__traceback__),
         )
     else:
-        logger.warning("Catalogue API failure: %s", type(error).__name__)
+        logger.warning("Expected bot API failure: %s", type(error).__name__)
     text = translator.get(error_key(error), language)
     if isinstance(event, CallbackQuery) or hasattr(event, "message"):
         callback_message = getattr(event, "message", None)

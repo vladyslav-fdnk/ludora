@@ -16,6 +16,12 @@ def main_menu(language: str, translator: Translator) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text=translator.get("button.profile", language),
+                    callback_data="profile",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=translator.get("button.language", language),
                     callback_data="choose_language",
                 )

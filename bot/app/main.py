@@ -9,8 +9,10 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, BotCommandScopeDefault
 
 from app.api import BackendClient
+from app.auth import InMemoryTokenStorage
+from app.auth.service import TelegramAuthService
 from app.config import Settings
-from app.handlers import catalogue_router, start_router
+from app.handlers import catalogue_router, profile_router, start_router
 from app.localization import LanguagePreferences, Translator
 
 logging.basicConfig(level=logging.INFO)
@@ -26,11 +28,20 @@ def create_application(
     )
     dispatcher = Dispatcher()
     dispatcher.include_router(start_router)
+    dispatcher.include_router(profile_router)
     dispatcher.include_router(catalogue_router)
-    api_client = BackendClient(settings.backend_base_url, settings.api_timeout)
+    token_storage = InMemoryTokenStorage()
+    api_client = BackendClient(
+        settings.backend_base_url,
+        settings.api_timeout,
+        internal_secret=settings.internal_secret,
+        token_storage=token_storage,
+    )
+    auth_service = TelegramAuthService(api_client, token_storage)
     dispatcher["api_client"] = api_client
     dispatcher["translator"] = Translator()
     dispatcher["language_preferences"] = LanguagePreferences(settings.default_language)
+    dispatcher["auth_service"] = auth_service
     return bot, dispatcher, api_client
 
 
@@ -42,6 +53,7 @@ async def register_commands(bot: Bot, translator: Translator) -> None:
                 command="catalogue",
                 description=translator.get("command.catalogue", language),
             ),
+            BotCommand(command="profile", description=translator.get("command.profile", language)),
         ]
         try:
             await bot.set_my_commands(

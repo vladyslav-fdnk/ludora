@@ -27,3 +27,15 @@ class UnexpectedAPIStatus(APIError):
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
         super().__init__(f"Unexpected backend status: {status_code}")
+
+
+class AuthenticationFailed(APIError):
+    """Telegram synchronization was rejected by the backend."""
+
+
+class AuthenticationRequired(APIError):
+    """Stored authentication is missing or can no longer be refreshed."""
+
+
+class MissingTelegramUser(APIError):
+    """Telegram did not provide a usable sender identity."""

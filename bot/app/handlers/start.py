@@ -2,12 +2,14 @@ from aiogram import F, Router
 from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message
 
+from app.api.exceptions import APIError
+from app.auth.service import TelegramAuthService
 from app.keyboards.callbacks import LanguageCallback
 from app.keyboards.catalogue import language_keyboard
 from app.keyboards.menu import main_menu
 from app.localization import LanguagePreferences, Translator
 
-from .common import active_language
+from .common import active_language, show_error
 
 router = Router(name="start")
 
@@ -17,12 +19,19 @@ async def start_command(
     message: Message,
     translator: Translator,
     language_preferences: LanguagePreferences,
+    auth_service: TelegramAuthService,
 ) -> None:
     language = active_language(message.from_user, language_preferences)
-    await message.answer(
-        translator.get("welcome", language),
-        reply_markup=main_menu(language, translator),
-    )
+    try:
+        await auth_service.synchronize(message.from_user)
+        await message.answer(
+            translator.get("welcome", language),
+            reply_markup=main_menu(language, translator),
+        )
+    except APIError as error:
+        await show_error(message, error, language, translator)
+    except Exception as error:
+        await show_error(message, error, language, translator)
 
 
 @router.callback_query(F.data == "choose_language")

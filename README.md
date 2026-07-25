@@ -33,7 +33,8 @@ Ludora provides a REST API for managing digital products, orders, license keys, 
 - **Write access control** — product create/update/delete endpoints require an admin (staff) user.
 - **License key storage** — license keys are stored per product with a status (`AVAILABLE`, `RESERVED`, `SOLD`) and assigned to an order at payment time.
 - **JWT authentication** — registration, login (access/refresh token pair via Simple JWT), and an authenticated `me` endpoint.
-- **Custom user model** — a project-owned `User` model (currently extending Django's `AbstractUser` with no additional fields yet), so the identity layer can evolve independently of Django's default.
+- **Custom user model** — a project-owned, email-based `User` model with an optional unique Telegram identity.
+- **Telegram bot authentication and profile** — Telegram accounts are synchronized through an internal-secret-protected endpoint, receive JWTs, and can view a localized `/profile`.
 - **Order creation and history** — authenticated users can create orders and list their own order history.
 - **Simulated payment flow** — a service-layer function marks an order as paid, atomically reserves an available license key for the product, and creates a `Payment` record. No external payment provider is called.
 - **OpenAPI schema and Swagger UI** via drf-spectacular.
@@ -44,7 +45,7 @@ Ludora provides a REST API for managing digital products, orders, license keys, 
 
 ### Not Yet Implemented
 
-- Telegram bot command handlers — the bot connects to Telegram and starts polling, but no handlers, keyboards, or business logic are registered yet (`bot/app/handlers`, `keyboards`, and `services` are empty packages).
+- Checkout, order creation, payments, and license-key delivery from the Telegram bot.
 - Real payment gateway integration (e.g. Stripe, Telegram Stars) — the `payments` app currently only defines its Django app config, with no models or logic.
 - Reverse proxy / production deployment setup — `docker/nginx` is a placeholder; no `nginx` service exists in `docker-compose.yml` yet.
 
@@ -64,7 +65,8 @@ Ludora provides a REST API for managing digital products, orders, license keys, 
 - PostgreSQL 16
 
 **Bot**
-- Aiogram 3 (scaffold only — see [Roadmap](#roadmap))
+- Aiogram 3
+- HTTPX
 
 **Tooling & Infrastructure**
 - Docker / Docker Compose
@@ -81,7 +83,8 @@ Ludora provides a REST API for managing digital products, orders, license keys, 
 Ludora is split into two independently packaged Python projects that share infrastructure via Docker Compose:
 
 - **`backend/`** — a modular Django project exposing a REST API. The bot (and any future client) is intended to communicate with the backend exclusively through this API.
-- **`bot/`** — an Aiogram 3 application that will act as the Telegram-facing client of the backend API. Currently only the entry point exists; it starts and polls Telegram but has no registered handlers.
+- **`bot/`** — an Aiogram 3 client with catalogue, authentication, profile,
+  localization, and presentation layers.
 
 The backend follows a modular Django app structure, where each business domain is isolated into its own app. Business logic for orders and payments lives in dedicated service modules (`apps/orders/services.py`, `apps/orders/payment_services.py`) rather than in the views, keeping the views thin and the logic testable in isolation.
 
@@ -108,7 +111,7 @@ ludora/
 ├── backend/
 │   ├── apps/
 │   │   ├── games/            # Product catalog: platforms, categories, products, license keys
-│   │   ├── authentication/   # JWT auth, registration, "me" endpoint
+│   │   ├── authentication/   # JWT auth, Telegram sync, registration, "me"
 │   │   ├── users/            # Custom user model
 │   │   ├── orders/           # Orders, payments, license assignment
 │   │   └── payments/         # Placeholder — app config only, no logic yet
@@ -120,10 +123,12 @@ ludora/
 │
 ├── bot/
 │   ├── app/
-│   │   ├── handlers/            # Empty — reserved for aiogram routers
-│   │   ├── keyboards/           # Empty — reserved for keyboard builders
-│   │   ├── services/            # Empty — reserved for bot-side business logic
-│   │   └── main.py              # Starts the bot; no handlers registered yet
+│   │   ├── api/                 # Typed backend API client
+│   │   ├── auth/                # Token models, storage, and auth service
+│   │   ├── handlers/            # /start, /catalogue, /profile
+│   │   ├── localization/        # English and Russian messages/preferences
+│   │   ├── presentation/        # Escaped Telegram HTML
+│   │   └── main.py              # Application construction and polling
 │   ├── Dockerfile
 │   └── pyproject.toml
 │
@@ -160,6 +165,8 @@ Filtering is available on `platform`, `product_type`, and `categories`; search c
 |--------|-----------------------|---------------|-----------------------------------|
 | POST   | `/api/auth/register/` | Public        | Register a new user               |
 | POST   | `/api/auth/login/`    | Public        | Obtain a JWT access/refresh pair  |
+| POST   | `/api/auth/telegram/` | Internal secret | Synchronize a Telegram user and obtain JWTs |
+| POST   | `/api/auth/refresh/`  | Refresh token | Refresh a JWT access token         |
 | GET    | `/api/auth/me/`       | Authenticated | Retrieve the current user profile |
 
 ### Orders (`apps/orders`)
@@ -186,7 +193,10 @@ Exact request/response schemas are best explored through the generated OpenAPI s
 
 **Identity domain**
 
-- A project-owned `User` model, used as the authentication and ownership anchor for orders. It currently extends Django's `AbstractUser` without additional fields.
+- A project-owned email-based `User` model is the ownership anchor for orders.
+  `telegram_id` is nullable for ordinary users and unique for linked accounts;
+  bot-managed users use deterministic `telegram-<id>@bot.ludora.invalid`
+  addresses and unusable passwords.
 
 **Commerce domain**
 
@@ -203,6 +213,18 @@ Ludora uses **JWT-based authentication** via Simple JWT:
 2. The user logs in via `POST /api/auth/login/` and receives an access/refresh token pair.
 3. Authenticated requests (profile retrieval, order creation, order history, payment) send the JWT access token.
 4. The identity layer is backed by a custom `User` model, so it can be extended independently of Django's default user model.
+
+For Telegram, `/start` sends the stable numeric Telegram user ID and optional
+profile metadata to `POST /api/auth/telegram/` using
+`X-Bot-Internal-Secret`. The backend atomically creates or retrieves the
+unique mapping and returns access/refresh JWTs plus safe profile data. The bot
+stores tokens by Telegram ID behind a replaceable storage interface. Protected
+requests retry once after refreshing a rejected access token. `/profile`
+performs synchronization itself when needed, so `/start` is not a prerequisite.
+
+The current token and language-preference stores are process-local memory:
+tokens are lost on restart and are not shared across bot replicas. Redis or a
+database-backed implementation is the intended production replacement.
 
 ---
 
@@ -225,6 +247,11 @@ The project ships with a Docker Compose configuration that runs three services:
 - `bot` — the Aiogram bot service (starts and polls Telegram; exits cleanly if `BOT_TOKEN` is not set)
 
 The backend container waits for PostgreSQL to accept connections (via `pg_isready` in `entrypoint.sh`) before starting Django, avoiding startup race conditions.
+
+Set the same non-empty `BOT_INTERNAL_SECRET` for the backend and bot. It is
+loaded from `.env`, is never part of Telegram messages, and must not be
+committed. Other bot variables are `BOT_TOKEN`, `BOT_BACKEND_BASE_URL`,
+`BOT_API_TIMEOUT`, and `BOT_DEFAULT_LANGUAGE`.
 
 ### Running with Docker
 
@@ -267,7 +294,7 @@ uv sync
 uv run python app/main.py
 ```
 
-> The bot connects and starts polling but has no registered handlers yet — see [Roadmap](#roadmap).
+The available commands are `/start`, `/catalogue`, and `/profile`.
 
 ### Code Quality
 
@@ -316,7 +343,7 @@ This keeps the codebase lint-clean and functionally verified before merging chan
 
 The following items are planned but **not yet implemented**:
 
-- [ ] Telegram bot handlers (catalog browsing, order placement, payment flow from within Telegram)
+- [ ] Telegram bot checkout, order placement, payment flow, and license-key delivery
 - [ ] Integration with a real payment provider (e.g. Stripe, Telegram Stars)
 - [ ] Admin-side reporting/analytics
 - [ ] Reverse proxy and production deployment setup (nginx, TLS, environment hardening, CD pipeline)

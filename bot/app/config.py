@@ -14,6 +14,7 @@ class Settings:
     backend_base_url: str
     api_timeout: float
     default_language: str
+    internal_secret: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -23,6 +24,9 @@ class Settings:
             raise ConfigurationError("BOT_TOKEN is required")
         if not base_url:
             raise ConfigurationError("BOT_BACKEND_BASE_URL is required")
+        internal_secret = environ.get("BOT_INTERNAL_SECRET", "").strip()
+        if not internal_secret:
+            raise ConfigurationError("BOT_INTERNAL_SECRET is required")
         try:
             timeout = float(environ.get("BOT_API_TIMEOUT", "5"))
         except ValueError as exc:
@@ -33,4 +37,4 @@ class Settings:
         default_language = environ.get("BOT_DEFAULT_LANGUAGE", "en").strip().lower()
         if default_language not in {"en", "ru"}:
             raise ConfigurationError("BOT_DEFAULT_LANGUAGE must be 'en' or 'ru'")
-        return cls(token, base_url.rstrip("/"), timeout, default_language)
+        return cls(token, base_url.rstrip("/"), timeout, default_language, internal_secret)
