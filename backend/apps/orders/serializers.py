@@ -4,6 +4,14 @@ from apps.games.models import Product
 from apps.orders.models import Order, Payment
 
 
+class ErrorResponseSerializer(serializers.Serializer):
+    error = serializers.CharField()
+
+
+class PaymentCreateRequestSerializer(serializers.Serializer):
+    order = serializers.IntegerField()
+
+
 class OrderSerializer(serializers.ModelSerializer):
     product = serializers.PrimaryKeyRelatedField(
         queryset=Product.objects.filter(is_active=True),
@@ -43,7 +51,7 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
             "paid_at",
         )
 
-    def get_message(self, obj):
+    def get_message(self, obj) -> str:
         if obj.status == Order.Status.PAID:
             return "Payment successful"
 

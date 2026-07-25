@@ -1,3 +1,4 @@
+from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -6,6 +7,7 @@ from rest_framework.views import APIView
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order
 from apps.orders.serializers import (
+    ErrorResponseSerializer,
     MyOrderSerializer,
     OrderPaymentSerializer,
     OrderSerializer,
@@ -32,6 +34,21 @@ class OrderPayAPIView(APIView):
         IsAuthenticated,
     ]
 
+    @extend_schema(
+        request=None,
+        responses={
+            200: OrderPaymentSerializer,
+            400: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="The order cannot be paid.",
+            ),
+            404: OpenApiResponse(
+                response=ErrorResponseSerializer,
+                description="The order was not found for the authenticated user.",
+            ),
+        },
+        description="Pay an owned order and return its payment result.",
+    )
     def post(self, request, pk):
 
         try:
@@ -75,6 +92,9 @@ class MyOrdersAPIView(generics.ListAPIView):
     ]
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Order.objects.none()
+
         return (
             Order.objects.filter(
                 user=self.request.user,
