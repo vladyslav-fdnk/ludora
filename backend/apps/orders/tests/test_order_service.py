@@ -34,6 +34,7 @@ class OrderServiceTests(TestCase):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
+            total_price=Decimal("59.99"),
         )
 
         pay_order(order.id)
@@ -61,6 +62,7 @@ class OrderServiceTests(TestCase):
             product=self.product,
             email="test@test.com",
             status=Order.Status.PAID,
+            total_price=Decimal("59.99"),
         )
 
         with self.assertRaises(OrderPaymentError) as error:
@@ -75,6 +77,7 @@ class OrderServiceTests(TestCase):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
+            total_price=Decimal("59.99"),
         )
         paid_at = timezone.now()
 
@@ -100,20 +103,93 @@ class OrderServiceTests(TestCase):
         self.assertEqual(payment.amount, Decimal("59.99"))
         self.assertEqual(payment.paid_at, paid_at)
 
-    def test_price_paid_remains_unchanged_after_product_price_changes(self):
+    def test_payment_uses_order_total_after_product_price_changes(self):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
+            total_price=Decimal("59.99"),
         )
 
+        self.product.price = Decimal("79.99")
+        self.product.save(update_fields=("price",))
         pay_order(order.id)
         order.refresh_from_db()
-        paid_price = order.price_paid
+        payment = Payment.objects.get(order=order)
 
-        self.product.price = Decimal("79.99")
-        self.product.save()
-        order.refresh_from_db()
-
-        self.assertEqual(paid_price, Decimal("59.99"))
         self.assertEqual(order.price_paid, Decimal("59.99"))
+        self.assertEqual(payment.amount, Decimal("59.99"))
         self.assertEqual(order.product.price, Decimal("79.99"))
+
+    def test_legacy_order_without_total_is_rejected_explicitly(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="legacy@test.com",
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Order has no authoritative total and requires manual review",
+        ):
+            pay_order(order.id)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertIsNone(order.price_paid)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertFalse(Payment.objects.exists())
+
+    def test_missing_product_is_rejected_before_side_effects(self):
+        order = Order.objects.create(
+            product=None,
+            email="legacy@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Order has no product reference and requires manual review",
+        ):
+            pay_order(order.id)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertFalse(Payment.objects.exists())
+
+    def test_no_license_key_preserves_order_and_payment_state(self):
+        self.license_key.delete()
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
+            pay_order(order.id)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertIsNone(order.price_paid)
+        self.assertFalse(Payment.objects.exists())
+
+    def test_cart_order_is_rejected_by_direct_payment_flow(self):
+        order = Order.objects.create(
+            product=None,
+            email="cart@test.com",
+            source=Order.Source.CART,
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Cart orders are not payable in this stage",
+        ):
+            pay_order(order.id)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertFalse(Payment.objects.exists())

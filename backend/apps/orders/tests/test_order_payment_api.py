@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -44,6 +46,7 @@ class OrderTests(APITestCase):
             product=self.product,
             user=self.user,
             email=self.user.email,
+            total_price=Decimal("59.99"),
         )
 
         self.client.force_authenticate(
@@ -73,6 +76,7 @@ class OrderTests(APITestCase):
             product=self.product,
             user=self.user,
             email=self.user.email,
+            total_price=Decimal("59.99"),
         )
 
         self.client.force_authenticate(
@@ -91,6 +95,7 @@ class OrderTests(APITestCase):
             user=self.user,
             email=self.user.email,
             status=Order.Status.PAID,
+            total_price=Decimal("59.99"),
         )
 
         self.client.force_authenticate(
@@ -124,6 +129,7 @@ class OrderTests(APITestCase):
             product=self.product,
             user=self.user,
             email=self.user.email,
+            total_price=Decimal("59.99"),
         )
 
         self.client.force_authenticate(
@@ -143,6 +149,7 @@ class OrderTests(APITestCase):
             product=self.product,
             user=self.user,
             email=self.user.email,
+            total_price=Decimal("59.99"),
         )
 
         response = self.client.post(

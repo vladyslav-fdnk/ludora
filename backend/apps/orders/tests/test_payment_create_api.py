@@ -33,6 +33,7 @@ class PaymentCreateAPIViewTests(APITestCase):
             product=self.product,
             user=self.user,
             email=self.user.email,
+            total_price=self.product.price,
         )
         self.url = reverse("orders:payment-create")
 

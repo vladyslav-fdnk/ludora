@@ -30,6 +30,7 @@ class PaymentServiceTests(TestCase):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
+            total_price=Decimal("59.99"),
         )
 
         payment = create_payment(order)
@@ -49,6 +50,48 @@ class PaymentServiceTests(TestCase):
             Decimal("59.99"),
         )
 
+    def test_missing_total_is_rejected_without_creating_payment(self):
+        order = Order.objects.create(product=self.product, email="legacy@test.com")
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Order has no authoritative total and requires manual review",
+        ):
+            create_payment(order)
+
+        self.assertFalse(Payment.objects.exists())
+
+    def test_missing_product_is_rejected_without_creating_payment(self):
+        order = Order.objects.create(
+            product=None,
+            email="legacy@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Order has no product reference and requires manual review",
+        ):
+            create_payment(order)
+
+        self.assertFalse(Payment.objects.exists())
+
+    def test_cart_order_is_rejected_without_creating_payment(self):
+        order = Order.objects.create(
+            product=None,
+            email="cart@test.com",
+            source=Order.Source.CART,
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Cart orders are not payable in this stage",
+        ):
+            create_payment(order)
+
+        self.assertFalse(Payment.objects.exists())
+
 
 class ConcurrentPaymentServiceTests(TransactionTestCase):
     def setUp(self):
@@ -61,6 +104,7 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
         self.order = Order.objects.create(
             product=self.product,
             email="test@test.com",
+            total_price=Decimal("59.99"),
         )
 
     def test_create_payment_reloads_and_locks_order(self):
@@ -144,3 +188,11 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
             ).count(),
             1,
         )
+
+    def test_payment_amount_uses_order_total_after_catalogue_price_change(self):
+        self.product.price = Decimal("89.99")
+        self.product.save(update_fields=("price",))
+
+        payment = create_payment(self.order)
+
+        self.assertEqual(payment.amount, Decimal("59.99"))
