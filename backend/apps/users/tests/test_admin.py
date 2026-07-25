@@ -14,8 +14,13 @@ class UserAdminTests(TestCase):
         self.assertIsInstance(model_admin, CustomUserAdmin)
         self.assertIn("email", model_admin.list_display)
         self.assertIn("email", model_admin.search_fields)
-        self.assertNotIn("username", str(model_admin.fieldsets))
-        self.assertNotIn("username", str(model_admin.add_fieldsets))
+        configured_fields = {
+            field
+            for _, options in (*model_admin.fieldsets, *model_admin.add_fieldsets)
+            for field in options["fields"]
+        }
+        self.assertNotIn("username", configured_fields)
+        self.assertIn("telegram_username", configured_fields)
 
     def test_admin_creation_form_hashes_password(self):
         form = CustomUserAdmin.add_form(

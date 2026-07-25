@@ -24,15 +24,27 @@ class CustomUserAdmin(UserAdmin):
     ordering = ("email",)
     list_display = (
         "email",
+        "telegram_id",
         "is_staff",
         "is_active",
         "is_superuser",
         "date_joined",
     )
     list_filter = ("is_staff", "is_active", "is_superuser")
-    search_fields = ("email",)
+    search_fields = ("email", "telegram_id", "telegram_username")
     fieldsets = (
-        (None, {"fields": ("email", "password")}),
+        (
+            None,
+            {
+                "fields": (
+                    "email",
+                    "password",
+                    "telegram_id",
+                    "telegram_username",
+                    "telegram_language_code",
+                )
+            },
+        ),
         (
             "Permissions",
             {

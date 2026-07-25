@@ -3,7 +3,12 @@ from rest_framework_simplejwt.views import (
     TokenRefreshView,
 )
 
-from .views import EmailTokenObtainPairView, MeAPIView, RegisterAPIView
+from .views import (
+    EmailTokenObtainPairView,
+    MeAPIView,
+    RegisterAPIView,
+    TelegramAuthenticationAPIView,
+)
 
 urlpatterns = [
     path(
@@ -25,5 +30,10 @@ urlpatterns = [
         "me/",
         MeAPIView.as_view(),
         name="me",
+    ),
+    path(
+        "telegram/",
+        TelegramAuthenticationAPIView.as_view(),
+        name="telegram-authentication",
     ),
 ]

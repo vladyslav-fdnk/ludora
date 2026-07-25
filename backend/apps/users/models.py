@@ -31,6 +31,14 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     username = None
     email = models.EmailField("email address", unique=True)
+    telegram_id = models.PositiveBigIntegerField(
+        unique=True,
+        null=True,
+        blank=True,
+        help_text="Stable Telegram account identifier for bot-managed users.",
+    )
+    telegram_username = models.CharField(max_length=32, blank=True)
+    telegram_language_code = models.CharField(max_length=35, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
