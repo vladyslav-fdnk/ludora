@@ -2,23 +2,52 @@ services:
   postgres:
     image: postgres:16-alpine
     env_file: .env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
 
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build: ./backend
     env_file: .env
-    # depends_on only controls container start order. Actual readiness is
-    # enforced by backend/entrypoint.sh, which polls pg_isready before
-    # starting Django.
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./backend:/app
     ports:
       - "8000:8000"
+
+  celery_worker:
+    build: ./backend
+    restart: unless-stopped
+    command: ["uv", "run", "celery", "-A", "config", "worker", "--loglevel=INFO"]
+    env_file: .env
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
 
   bot:
     build: ./bot
@@ -33,5 +62,4 @@ services:
 volumes:
   postgres_data:
 
-    # TODO: add a redis service once Celery is introduced.
-    # TODO: add an nginx service (see docker/nginx) once the project is deployed.
+# TODO: add an nginx service (see docker/nginx) once the project is deployed.

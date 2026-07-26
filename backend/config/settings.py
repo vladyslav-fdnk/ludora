@@ -17,6 +17,7 @@ SECRET_KEY = os.getenv(
 DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
 BOT_INTERNAL_SECRET = os.getenv("BOT_INTERNAL_SECRET", "")
 
+
 def get_list_env(name: str) -> list[str]:
     value = os.getenv(name, "")
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -35,6 +36,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     # Local apps
+    "apps.core.apps.CoreConfig",
     "apps.authentication.apps.AuthenticationConfig",
     "apps.carts.apps.CartsConfig",
     "apps.games.apps.GamesConfig",
@@ -134,3 +136,13 @@ SPECTACULAR_SETTINGS = {
 }
 
 AUTH_USER_MODEL = "users.User"
+
+
+# Celery
+CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_TASK_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = USE_TZ
+CELERY_TASK_IGNORE_RESULT = True
