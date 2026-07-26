@@ -136,8 +136,12 @@ locks.
 
 The **aiogram bot** is a presentation adapter for Telegram. It uses the same API that another client could use and does not connect to PostgreSQL.
 
-The **Django admin** is the current staff-facing management surface. Public and bot clients receive only active catalogue entries, while staff-only API operations and admin support
-catalogue maintenance.
+The **Django admin** is the current staff-facing management surface. It supports
+catalogue management with annotated license-key inventory totals and masked key
+inspection. Orders expose read-only item and payment inlines, while standalone
+order and payment views protect operational fields from manual editing;
+payments and sold license keys are also protected from deletion. Public and bot
+clients receive only active catalogue entries.
 
 ## Backend architecture
 
