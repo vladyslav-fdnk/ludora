@@ -4,6 +4,7 @@ from django.contrib import admin
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth import get_user_model
 from django.contrib.messages.storage.fallback import FallbackStorage
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
@@ -32,6 +33,10 @@ class ProductAdminTests(TestCase):
         self.superuser = User.objects.create_superuser(
             email="product-admin@example.com",
             password="password123",
+        )
+        self.import_url = reverse(
+            "admin:games_product_import_license_keys",
+            args=(self.product.pk,),
         )
 
     def test_product_is_registered(self):
@@ -119,6 +124,209 @@ class ProductAdminTests(TestCase):
         )
         self.assertNotContains(response, 'class="add-row"')
 
+    def test_change_page_has_import_license_keys_object_tool(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(
+            reverse("admin:games_product_change", args=(self.product.pk,))
+        )
+
+        self.assertContains(response, "Import License Keys")
+        self.assertContains(response, self.import_url)
+
+    def test_successful_csv_import_creates_available_keys_for_product(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {
+                "csv_file": self.csv_file(
+                    "value,notes\n AAAA-BBBB-CCCC ,first\nDDDD-EEEE-FFFF,second\n"
+                )
+            },
+            follow=True,
+        )
+
+        self.assertRedirects(
+            response,
+            reverse("admin:games_product_change", args=(self.product.pk,)),
+        )
+        keys = LicenseKey.objects.filter(product=self.product).order_by("value")
+        self.assertEqual(keys.count(), 2)
+        self.assertEqual(
+            list(keys.values_list("value", flat=True)),
+            ["AAAA-BBBB-CCCC", "DDDD-EEEE-FFFF"],
+        )
+        self.assertTrue(
+            all(key.status == LicenseKey.Status.AVAILABLE for key in keys)
+        )
+        self.assertContains(response, "Imported: 2")
+        self.assertContains(response, "Skipped duplicates: 0")
+        self.assertContains(response, "Skipped empty rows: 0")
+
+    def test_csv_import_skips_database_and_file_duplicates(self):
+        LicenseKey.objects.create(
+            product=self.product,
+            value="EXISTING-KEY",
+            status=LicenseKey.Status.RESERVED,
+        )
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {
+                "csv_file": self.csv_file(
+                    "value\nEXISTING-KEY\nNEW-KEY\nNEW-KEY\nEXISTING-KEY\n"
+                )
+            },
+            follow=True,
+        )
+
+        self.assertEqual(
+            LicenseKey.objects.filter(product=self.product).count(),
+            2,
+        )
+        self.assertEqual(
+            LicenseKey.objects.get(
+                product=self.product,
+                value="EXISTING-KEY",
+            ).status,
+            LicenseKey.Status.RESERVED,
+        )
+        self.assertContains(response, "Imported: 1")
+        self.assertContains(response, "Skipped duplicates: 3")
+
+    def test_csv_import_ignores_empty_rows(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {"csv_file": self.csv_file("value\n\n   \nVALID-KEY\n,\n")},
+            follow=True,
+        )
+
+        self.assertEqual(
+            list(
+                LicenseKey.objects.filter(product=self.product).values_list(
+                    "value",
+                    flat=True,
+                )
+            ),
+            ["VALID-KEY"],
+        )
+        self.assertContains(response, "Skipped empty rows: 3")
+
+    def test_csv_import_accepts_utf8_bom(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {"csv_file": self.csv_file("\ufeffvalue\nBOM-KEY\n")},
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(
+            LicenseKey.objects.filter(
+                product=self.product,
+                value="BOM-KEY",
+                status=LicenseKey.Status.AVAILABLE,
+            ).exists()
+        )
+
+    def test_csv_import_with_only_duplicates_reports_all_counters_as_warning(self):
+        LicenseKey.objects.create(product=self.product, value="EXISTING-KEY")
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {
+                "csv_file": self.csv_file(
+                    "value\nEXISTING-KEY\nEXISTING-KEY\n\n"
+                )
+            },
+            follow=True,
+        )
+
+        self.assertContains(
+            response,
+            "Imported: 0 Skipped duplicates: 2 Skipped empty rows: 1",
+        )
+        self.assertContains(response, '<li class="warning">', html=False)
+        self.assertEqual(LicenseKey.objects.filter(product=self.product).count(), 1)
+
+    def test_missing_value_column_displays_form_validation_error(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {"csv_file": self.csv_file("key,notes\nA-B-C,test\n")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            'must include a header with a "value" column',
+            response.context["form"].errors["csv_file"][0],
+        )
+        self.assertFalse(LicenseKey.objects.filter(product=self.product).exists())
+
+    def test_non_staff_user_cannot_access_import_page(self):
+        user = User.objects.create_user(
+            email="import-user@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(self.import_url)
+
+        self.assertEqual(response.status_code, 302)
+
+    def test_staff_without_product_change_permission_cannot_access_import_page(self):
+        user = User.objects.create_user(
+            email="staff-import-user@example.com",
+            password="password123",
+            is_staff=True,
+        )
+        self.client.force_login(user)
+
+        response = self.client.get(self.import_url)
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_non_csv_file_extension_displays_validation_error_and_creates_no_keys(
+        self,
+    ):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {
+                "csv_file": self.csv_file(
+                    "value\nVALID-KEY\n",
+                    filename="license-keys.txt",
+                )
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "File extension “txt” is not allowed",
+            response.context["form"].errors["csv_file"][0],
+        )
+        self.assertFalse(LicenseKey.objects.filter(product=self.product).exists())
+
+    def test_malformed_csv_does_not_create_any_keys(self):
+        self.client.force_login(self.superuser)
+
+        response = self.client.post(
+            self.import_url,
+            {"csv_file": self.csv_file('value\nVALID-KEY\n"unclosed')},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Upload a valid CSV file")
+        self.assertFalse(LicenseKey.objects.filter(product=self.product).exists())
+
     def test_regular_user_cannot_access_admin(self):
         user = User.objects.create_user(
             email="user@example.com",
@@ -129,6 +337,14 @@ class ProductAdminTests(TestCase):
         response = self.client.get(reverse("admin:index"))
 
         self.assertEqual(response.status_code, 302)
+
+    @staticmethod
+    def csv_file(content, filename="license-keys.csv"):
+        return SimpleUploadedFile(
+            filename,
+            content.encode(),
+            content_type="text/csv",
+        )
 
 
 class LicenseKeyAdminTests(TestCase):

@@ -1,6 +1,13 @@
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.core.exceptions import PermissionDenied
+from django.db import transaction
 from django.db.models import Count, Q
+from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
+from django.utils.http import unquote
 
+from apps.games.forms import LicenseKeyCSVImportForm
 from apps.games.models import Category, LicenseKey, Platform, Product
 
 
@@ -56,6 +63,7 @@ class LicenseKeyInline(admin.TabularInline):
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+    change_form_template = "admin/games/product/change_form.html"
     list_display = (
         "title",
         "platform",
@@ -101,6 +109,87 @@ class ProductAdmin(admin.ModelAdmin):
     )
     actions = ("activate_products", "deactivate_products")
     inlines = (LicenseKeyInline,)
+
+    def get_urls(self):
+        return [
+            path(
+                "<path:object_id>/import-license-keys/",
+                self.admin_site.admin_view(self.import_license_keys_view),
+                name="games_product_import_license_keys",
+            ),
+            *super().get_urls(),
+        ]
+
+    def import_license_keys_view(self, request, object_id):
+        product = self.get_object(request, unquote(object_id))
+        if product is None:
+            return self._get_obj_does_not_exist_redirect(
+                request,
+                Product._meta,
+                object_id,
+            )
+        if not self.has_change_permission(request, product):
+            raise PermissionDenied
+
+        if request.method == "POST":
+            form = LicenseKeyCSVImportForm(request.POST, request.FILES)
+            if form.is_valid():
+                csv_import = form.cleaned_data["csv_file"]
+                unique_values = list(dict.fromkeys(csv_import.values))
+                duplicates_in_file = len(csv_import.values) - len(unique_values)
+
+                with transaction.atomic():
+                    existing_values = set(
+                        LicenseKey.objects.filter(
+                            product=product,
+                            value__in=unique_values,
+                        ).values_list("value", flat=True)
+                    )
+                    new_values = [
+                        value for value in unique_values if value not in existing_values
+                    ]
+                    LicenseKey.objects.bulk_create(
+                        [
+                            LicenseKey(
+                                product=product,
+                                value=value,
+                                status=LicenseKey.Status.AVAILABLE,
+                            )
+                            for value in new_values
+                        ]
+                    )
+
+                skipped_duplicates = duplicates_in_file + len(existing_values)
+                message_level = messages.SUCCESS if new_values else messages.WARNING
+                self.message_user(
+                    request,
+                    (
+                        f"Imported: {len(new_values)} "
+                        f"Skipped duplicates: {skipped_duplicates} "
+                        f"Skipped empty rows: {csv_import.empty_row_count}"
+                    ),
+                    message_level,
+                )
+                return HttpResponseRedirect(
+                    reverse("admin:games_product_change", args=(product.pk,))
+                )
+        else:
+            form = LicenseKeyCSVImportForm()
+
+        context = {
+            **self.admin_site.each_context(request),
+            "opts": self.model._meta,
+            "original": product,
+            "product": product,
+            "title": "Import license keys",
+            "form": form,
+            "media": self.media + form.media,
+        }
+        return TemplateResponse(
+            request,
+            "admin/games/import_license_keys.html",
+            context,
+        )
 
     def get_queryset(self, request):
         return (

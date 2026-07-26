@@ -143,6 +143,15 @@ order and payment views protect operational fields from manual editing;
 payments and sold license keys are also protected from deletion. Public and bot
 clients receive only active catalogue entries.
 
+Staff with product change permission can bulk-create license-key inventory from
+the product change page by uploading a UTF-8 CSV file with a required `value`
+column. The admin validates and parses the complete file before writing, trims
+values, ignores empty rows and additional columns, and skips both repeated CSV
+values and keys already belonging to that product. New keys are inserted in one
+atomic `bulk_create` operation with `AVAILABLE` status; existing keys are never
+modified. The admin reports imported, duplicate, and empty-row counts after a
+successful import.
+
 ## Backend architecture
 
 The backend is organized as a Django project plus domain applications:

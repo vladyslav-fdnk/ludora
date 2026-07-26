@@ -1,0 +1,13 @@
+{% extends "admin/change_form.html" %}
+{% load i18n %}
+
+{% block object-tools-items %}
+  {% if change and has_change_permission %}
+    <li>
+      <a href="{% url 'admin:games_product_import_license_keys' original.pk %}">
+        {% translate "Import License Keys" %}
+      </a>
+    </li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}
