@@ -7,10 +7,14 @@ from app.api.exceptions import (
     AuthenticationRequired,
     BackendTimeout,
     BackendUnavailable,
+    Conflict,
     InvalidResponse,
     MissingTelegramUser,
+    PermissionDenied,
     ProductNotFound,
+    ResourceNotFound,
     UnexpectedAPIStatus,
+    ValidationFailed,
 )
 from app.localization import LanguagePreferences, Translator
 
@@ -33,6 +37,14 @@ def error_key(error: Exception) -> str:
         return "error.invalid_response"
     if isinstance(error, ProductNotFound):
         return "error.not_found"
+    if isinstance(error, ResourceNotFound):
+        return "error.resource_not_found"
+    if isinstance(error, ValidationFailed):
+        return "error.validation"
+    if isinstance(error, Conflict):
+        return "error.conflict"
+    if isinstance(error, PermissionDenied):
+        return "error.permission"
     if isinstance(error, MissingTelegramUser):
         return "error.missing_user"
     if isinstance(error, AuthenticationRequired):

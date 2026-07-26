@@ -1,6 +1,9 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -8,6 +11,7 @@ from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 from apps.orders.models import Order
+from apps.orders.services import create_direct_order
 
 User = get_user_model()
 
@@ -36,19 +40,19 @@ class MyOrdersAPIViewTests(APITestCase):
             price=59.99,
         )
 
-        self.order1 = Order.objects.create(
+        self.order1 = create_direct_order(
             user=self.user,
             product=self.product,
             email=self.user.email,
         )
 
-        self.order2 = Order.objects.create(
+        self.order2 = create_direct_order(
             user=self.user,
             product=self.product,
             email=self.user.email,
         )
 
-        self.order3 = Order.objects.create(
+        self.order3 = create_direct_order(
             user=self.other_user,
             product=self.product,
             email=self.other_user.email,
@@ -104,6 +108,28 @@ class MyOrdersAPIViewTests(APITestCase):
             order_numbers,
         )
 
+        serialized = response.data["results"][0]
+        self.assertEqual(
+            set(serialized),
+            {
+                "id",
+                "order_number",
+                "product",
+                "status",
+                "source",
+                "total_price",
+                "price_paid",
+                "created_at",
+                "paid_at",
+                "items",
+            },
+        )
+        self.assertEqual(serialized["source"], Order.Source.DIRECT)
+        self.assertEqual(serialized["product"], "Cyberpunk 2077")
+        self.assertEqual(serialized["total_price"], "59.99")
+        self.assertEqual(serialized["items"][0]["product_title"], "Cyberpunk 2077")
+        self.assertEqual(serialized["items"][0]["unit_price"], "59.99")
+
     def test_orders_are_ordered_by_created_date_desc(self):
         self.order1.created_at = timezone.now()
         self.order1.save()
@@ -130,3 +156,19 @@ class MyOrdersAPIViewTests(APITestCase):
             orders[1]["order_number"],
             self.order1.order_number,
         )
+
+    def test_list_queries_are_bounded_and_uses_item_snapshots(self):
+        self.product.title = "Renamed Product"
+        self.product.price = Decimal("99.99")
+        self.product.save(update_fields=("title", "price"))
+        self.client.force_authenticate(user=self.user)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(len(queries), 4)
+        for order in response.data["results"]:
+            self.assertEqual(order["product"], "Cyberpunk 2077")
+            self.assertEqual(order["items"][0]["product_title"], "Cyberpunk 2077")
+            self.assertEqual(order["items"][0]["unit_price"], "59.99")

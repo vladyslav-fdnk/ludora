@@ -1,6 +1,17 @@
 from django.contrib import admin
 
-from apps.orders.models import Order, Payment
+from apps.orders.models import Order, OrderItem, Payment
+
+
+class OrderItemInline(admin.TabularInline):
+    model = OrderItem
+    extra = 0
+    readonly_fields = (
+        "product",
+        "product_title",
+        "quantity",
+        "unit_price",
+    )
 
 
 @admin.register(Order)
@@ -9,6 +20,8 @@ class OrderAdmin(admin.ModelAdmin):
         "order_number",
         "customer",
         "product",
+        "source",
+        "total_price",
         "status",
         "price_paid",
         "created_at",
@@ -16,6 +29,7 @@ class OrderAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "status",
+        "source",
         "created_at",
         "product",
         "product__platform",
@@ -32,6 +46,8 @@ class OrderAdmin(admin.ModelAdmin):
         "user",
         "email",
         "product",
+        "source",
+        "total_price",
         "status",
         "price_paid",
         "license_key",
@@ -41,6 +57,7 @@ class OrderAdmin(admin.ModelAdmin):
     )
     date_hierarchy = "created_at"
     ordering = ("-created_at",)
+    inlines = (OrderItemInline,)
 
     @admin.display(description="Customer", ordering="user__email")
     def customer(self, obj):

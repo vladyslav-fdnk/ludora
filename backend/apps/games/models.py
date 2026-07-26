@@ -63,6 +63,12 @@ class Product(models.Model):
 
     class Meta:
         ordering = ["title"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(price__gte=0),
+                name="product_price_nonnegative",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.title

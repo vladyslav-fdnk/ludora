@@ -66,6 +66,29 @@ class OrderSchemaTests(APITestCase):
             )
             self.assertEqual(set(error_schema["properties"]), {"error"})
 
+    def test_my_orders_schema_exposes_normalized_items_and_totals(self):
+        operation = self.response.data["paths"]["/api/orders/my/"]["get"]
+        page_schema = self._json_schema(operation["responses"]["200"]["content"])
+        item_schema = self._json_schema(
+            {"application/json": {"schema": page_schema["properties"]["results"]["items"]}}
+        )
+
+        self.assertEqual(
+            set(item_schema["properties"]),
+            {
+                "id",
+                "order_number",
+                "product",
+                "status",
+                "source",
+                "total_price",
+                "price_paid",
+                "created_at",
+                "paid_at",
+                "items",
+            },
+        )
+
     def test_payment_create_schema_matches_api_payloads(self):
         operation = self.response.data["paths"]["/api/orders/payments/"]["post"]
         request_schema = self._json_schema(

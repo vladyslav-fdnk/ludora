@@ -1,41 +1,106 @@
-name: Django Tests
+name: Continuous Integration
 
 on:
   push:
     branches:
       - master
-
   pull_request:
     branches:
       - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  test:
-
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DJANGO_SECRET_KEY: ci-only-django-secret-key-at-least-32-characters
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      BOT_INTERNAL_SECRET: ci-only-bot-internal-secret
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ludora_ci
+      POSTGRES_USER: ludora_ci
+      POSTGRES_PASSWORD: ludora_ci_password
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ludora_ci
+          POSTGRES_USER: ludora_ci
+          POSTGRES_PASSWORD: ludora_ci_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ludora_ci -d ludora_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
-
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
 
-      - name: Create environment file
-        run: cp .env.example .env
+      - name: Install backend dependencies
+        run: uv sync --frozen
 
-      - name: Start Docker services
-        run: docker compose up -d --build
+      - name: Run Ruff checks
+        run: uv run --frozen ruff check .
 
-      - name: Run lint
-        run: docker compose exec -T backend uv run ruff check .
-      
-      - name: Run tests
-        run: docker compose exec -T backend uv run pytest
-      
+      - name: Run Django system checks
+        run: uv run --frozen python manage.py check
+
+      - name: Check migration consistency
+        run: uv run --frozen python manage.py makemigrations --check --dry-run
+
+      - name: Run backend tests
+        run: uv run --frozen pytest
+
+  bot:
+    name: Telegram bot
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bot
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: bot/uv.lock
+
+      - name: Install bot dependencies
+        run: uv sync --frozen
+
+      - name: Run Ruff checks
+        run: uv run --frozen ruff check .
+
+      - name: Run bot tests
+        run: uv run --frozen pytest

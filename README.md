@@ -2,20 +2,21 @@
 
 Ludora is a backend-focused digital marketplace built around a Django REST API and
 an aiogram Telegram client. It demonstrates catalogue management, two JWT
-authentication paths, Telegram account synchronization, and tested commerce
-domain logic in a Docker-based development environment.
+authentication paths, Telegram account synchronization, persistent carts, and
+tested commerce domain logic in a Docker-based development environment.
 
 The current release is **v0.2.0**. Stage 2 completed Telegram authentication,
 including user synchronization, profiles, token refresh, and a one-time retry of
-protected requests.
+protected requests. Stage 3 adds authenticated cart management and order creation
+from a cart; the published release marker remains v0.2.0.
 
 ## Architecture
 
 Ludora contains two independently packaged Python applications:
 
 - **Backend:** Django and Django REST Framework expose the marketplace API.
-- **Database:** PostgreSQL stores users, catalogue data, orders, payments, and
-  license keys.
+- **Database:** PostgreSQL stores users, catalogue data, carts, normalized order
+  items, payments, and license keys.
 - **Telegram bot:** aiogram communicates with the backend through an asynchronous
   HTTPX client.
 - **Authentication:** Simple JWT supports email/password login. A separate
@@ -55,18 +56,26 @@ model and payment-related service logic live in the `orders` app.
 - Automatic access-token refresh and one retry after a protected request returns
   `401 Unauthorized`.
 
-### Orders and license keys
+### Carts, orders, and license keys
 
 Backend models, APIs, and service logic already support:
 
 - Creating an authenticated user's order for one product.
+- One persistent cart per authenticated user.
+- Adding, changing, removing, and clearing cart items.
+- Server-calculated Decimal cart totals with a maximum quantity of 99 per
+  product.
+- Atomic multi-product order creation from the current cart.
+- Immutable order-item title, quantity, and unit-price snapshots.
 - Listing the authenticated user's orders.
 - Creating payment records for owned orders.
 - A simulated payment operation that assigns an available license key and marks
   the order as paid.
 
-There is no external payment provider or Telegram checkout flow yet. License-key
-delivery through the bot is also not implemented.
+Cart checkout creates an order but intentionally creates no payment and assigns
+no license key. The legacy simulated payment flow remains available only for
+direct single-product orders. External payments, payment of cart orders, and
+license-key delivery through the bot are not implemented.
 
 ## API
 
@@ -112,6 +121,20 @@ client login endpoint.
 | `POST` | `/api/orders/<id>/pay/` | JWT | Run the simulated payment flow |
 | `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
 
+### Cart
+
+| Method | Endpoint | Access | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/cart/` | JWT | Get or automatically create the current user's cart |
+| `POST` | `/api/cart/items/` | JWT | Add a product or increase its quantity |
+| `PATCH` | `/api/cart/items/<id>/` | JWT | Set an owned cart item's quantity |
+| `DELETE` | `/api/cart/items/<id>/` | JWT | Remove an owned cart item |
+| `DELETE` | `/api/cart/clear/` | JWT | Clear the current user's cart |
+| `POST` | `/api/cart/checkout/` | JWT | Atomically create an order and clear the cart |
+
+Cart item requests accept product identifiers and positive quantities only.
+Prices, line totals, and cart totals are always calculated by the backend.
+
 ## Telegram Bot
 
 The bot currently provides:
@@ -121,6 +144,10 @@ The bot currently provides:
 - `/catalogue` — displays the paginated product catalogue.
 - Product detail navigation through inline keyboards.
 - `/profile` — synchronizes when necessary and displays the backend user profile.
+- `/cart` and the main-menu Cart button — display the authenticated cart.
+- Add-to-cart controls on product details.
+- Quantity increase/decrease, removal, and confirmed cart clearing.
+- Confirmed order creation with a localized order summary.
 - English and Russian interface text and language selection.
 - Friendly handling of backend, timeout, and malformed-response errors.
 - Refresh-token handling with a single retry of a rejected protected request.
@@ -166,7 +193,7 @@ polling when its required environment variables are configured.
 
 ### Tests
 
-The current suites contain **97 backend tests** and **66 bot tests**.
+The current suites contain **123 backend tests** and **82 bot tests**.
 
 ```bash
 docker compose exec backend uv run pytest
@@ -225,8 +252,9 @@ ludora/
 ├── backend/
 │   ├── apps/
 │   │   ├── authentication/  # Email/JWT and internal Telegram authentication
+│   │   ├── carts/           # Persistent carts, cart items, checkout API/services
 │   │   ├── games/           # Products, platforms, categories, and license keys
-│   │   ├── orders/          # Orders, payments, APIs, and service-layer logic
+│   │   ├── orders/          # Orders, order items, payments, APIs, and services
 │   │   ├── payments/        # Placeholder for future provider integration
 │   │   └── users/           # Custom email-based user model
 │   ├── config/              # Django settings and root URL configuration
@@ -238,7 +266,7 @@ ludora/
 │   ├── app/
 │   │   ├── api/             # Typed asynchronous backend client
 │   │   ├── auth/            # Telegram auth service and token storage
-│   │   ├── handlers/        # Start, catalogue, and profile handlers
+│   │   ├── handlers/        # Start, catalogue, profile, and cart handlers
 │   │   ├── keyboards/       # Inline and reply keyboards
 │   │   ├── localization/    # English/Russian messages and preferences
 │   │   └── presentation/    # Telegram-safe response formatting
@@ -254,9 +282,9 @@ ludora/
 
 The next planned marketplace features are:
 
-- [ ] Cart
-- [ ] Cart items
-- [ ] Order creation from a cart
+- [x] Cart
+- [x] Cart items
+- [x] Order creation from a cart
 - [ ] External payment integration
 - [ ] License-key delivery through the bot
 - [ ] Redis-backed token storage

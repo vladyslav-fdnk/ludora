@@ -3,7 +3,12 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from app.api.schemas import ProductPage
 from app.localization import Translator
 
-from .callbacks import CataloguePageCallback, LanguageCallback, ProductCallback
+from .callbacks import (
+    AddCartCallback,
+    CataloguePageCallback,
+    LanguageCallback,
+    ProductCallback,
+)
 
 
 def catalogue_keyboard(
@@ -51,10 +56,25 @@ def catalogue_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def product_keyboard(page: int, language: str, translator: Translator) -> InlineKeyboardMarkup:
+def product_keyboard(
+    page: int,
+    language: str,
+    translator: Translator,
+    product_id: int | None = None,
+) -> InlineKeyboardMarkup:
     safe_page = max(1, page)
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
+    rows = []
+    if product_id is not None:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=translator.get("button.add_cart", language),
+                    callback_data=AddCartCallback(product_id=product_id).pack(),
+                )
+            ]
+        )
+    rows.extend(
+        [
             [
                 InlineKeyboardButton(
                     text=translator.get("button.back", language),
@@ -69,6 +89,7 @@ def product_keyboard(page: int, language: str, translator: Translator) -> Inline
             ],
         ]
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:

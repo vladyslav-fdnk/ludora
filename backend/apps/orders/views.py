@@ -99,6 +99,6 @@ class MyOrdersAPIView(generics.ListAPIView):
             Order.objects.filter(
                 user=self.request.user,
             )
-            .select_related("product")
+            .prefetch_related("items")
             .order_by("-created_at")
         )

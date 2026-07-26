@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from apps.games.models import Product
-from apps.orders.models import Order, Payment
+from apps.orders.models import Order, OrderItem, Payment
+from apps.orders.services import create_direct_order
 
 
 class ErrorResponseSerializer(serializers.Serializer):
@@ -12,28 +13,69 @@ class PaymentCreateRequestSerializer(serializers.Serializer):
     order = serializers.IntegerField()
 
 
+class OrderItemSerializer(serializers.ModelSerializer):
+    line_total = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = OrderItem
+        fields = (
+            "product",
+            "product_title",
+            "quantity",
+            "unit_price",
+            "line_total",
+        )
+
+
 class OrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(many=True, read_only=True)
     product = serializers.PrimaryKeyRelatedField(
         queryset=Product.objects.filter(is_active=True),
     )
 
     class Meta:
         model = Order
-
-        fields = [
+        fields = (
             "id",
+            "order_number",
             "product",
             "email",
             "status",
+            "source",
+            "total_price",
+            "items",
             "license_key",
             "created_at",
-        ]
-
-        read_only_fields = [
+        )
+        read_only_fields = (
             "status",
+            "source",
+            "total_price",
             "license_key",
             "created_at",
-        ]
+        )
+
+    def create(self, validated_data):
+        return create_direct_order(**validated_data)
+
+
+class CheckoutOrderSerializer(serializers.ModelSerializer):
+    items = OrderItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "order_number",
+            "status",
+            "source",
+            "total_price",
+            "price_paid",
+            "items",
+            "created_at",
+        )
 
 
 class OrderPaymentSerializer(serializers.ModelSerializer):
@@ -59,21 +101,27 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
 
 
 class MyOrderSerializer(serializers.ModelSerializer):
-    product = serializers.CharField(
-        source="product.title",
-        read_only=True,
-    )
+    items = OrderItemSerializer(many=True, read_only=True)
+    product = serializers.SerializerMethodField()
 
     class Meta:
         model = Order
-        fields = [
+        fields = (
+            "id",
             "order_number",
             "product",
             "status",
+            "source",
+            "total_price",
             "price_paid",
             "created_at",
             "paid_at",
-        ]
+            "items",
+        )
+
+    def get_product(self, obj) -> str | None:
+        first_item = next(iter(obj.items.all()), None)
+        return first_item.product_title if first_item else None
 
 
 class PaymentSerializer(serializers.ModelSerializer):

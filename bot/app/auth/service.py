@@ -2,6 +2,7 @@ from typing import Any
 
 from app.api import BackendClient
 from app.api.exceptions import AuthenticationRequired, MissingTelegramUser
+from app.api.schemas import Cart, CartItem, CheckoutOrder
 
 from .models import AuthResult, BackendUser, TelegramIdentity
 from .storage import TokenStorage
@@ -32,6 +33,40 @@ class TelegramAuthService:
             # A missing/expired refresh token requires a fresh Telegram sync.
             await self.synchronize(telegram_user)
             return await self._client.get_profile(identity.telegram_id)
+
+    async def get_cart(self, telegram_user: Any) -> Cart:
+        return await self._protected(telegram_user, self._client.get_cart)
+
+    async def add_cart_item(
+        self, telegram_user: Any, product_id: int, quantity: int = 1
+    ) -> CartItem:
+        return await self._protected(
+            telegram_user, self._client.add_cart_item, product_id, quantity
+        )
+
+    async def update_cart_item(
+        self, telegram_user: Any, item_id: int, quantity: int
+    ) -> CartItem:
+        return await self._protected(
+            telegram_user, self._client.update_cart_item, item_id, quantity
+        )
+
+    async def remove_cart_item(self, telegram_user: Any, item_id: int) -> None:
+        await self._protected(telegram_user, self._client.remove_cart_item, item_id)
+
+    async def clear_cart(self, telegram_user: Any) -> None:
+        await self._protected(telegram_user, self._client.clear_cart)
+
+    async def checkout_cart(self, telegram_user: Any) -> CheckoutOrder:
+        return await self._protected(telegram_user, self._client.checkout_cart)
+
+    async def _protected(self, telegram_user: Any, operation, *args):
+        identity = await self.ensure_authenticated(telegram_user)
+        try:
+            return await operation(identity.telegram_id, *args)
+        except AuthenticationRequired:
+            await self.synchronize(telegram_user)
+            return await operation(identity.telegram_id, *args)
 
     @staticmethod
     def _identity(telegram_user: Any) -> TelegramIdentity:
