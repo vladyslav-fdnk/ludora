@@ -17,6 +17,17 @@ urlpatterns = [
         name="register",
     ),
     path(
+        "token/",
+        EmailTokenObtainPairView.as_view(),
+        name="token-obtain-pair",
+    ),
+    path(
+        "token/refresh/",
+        TokenRefreshView.as_view(),
+        name="token-refresh",
+    ),
+    # Compatibility aliases used by the existing Telegram client.
+    path(
         "login/",
         EmailTokenObtainPairView.as_view(),
         name="login",

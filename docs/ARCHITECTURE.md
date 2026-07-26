@@ -20,6 +20,37 @@ framework.
 The project uses a custom Django user model from the outset. Email is the login identifier, while optional Telegram identity fields allow the same backend user domain to support the
 bot channel.
 
+## Identity, authentication, and catalogue authorization
+
+The existing `users.User` model is the identity source. It extends Django's
+`AbstractUser`, removes the username field, and uses a case-insensitively unique
+email address as `USERNAME_FIELD`. Public registration accepts only email and
+password credentials, confirms the password, runs Django's configured password
+validators, and delegates creation to the user manager so passwords are hashed.
+Staff and superuser flags are never registration inputs.
+
+SimpleJWT is the API authentication boundary. A client registers separately,
+exchanges valid email/password credentials for an access/refresh pair, and sends
+the short-lived access token as `Authorization: Bearer <token>`. Refresh tokens
+can obtain a new access token without resending credentials. Tokens use HS256
+and Django's secret key; no separate signing secret or blacklist application is
+introduced. Django's session middleware remains installed for the admin, while
+DRF uses JWT authentication for API requests, avoiding session-CSRF coupling for
+JWT clients.
+
+DRF view permissions are the authorization boundary. Catalogue list and detail
+views remain public and continue to hide inactive products. Create, full update,
+partial update, and soft delete views share one explicit staff permission,
+which rejects anonymous and authenticated non-staff callers before serializer
+or business validation runs. Swagger exposes the JWT bearer scheme and marks
+protected operations so the same boundary is visible in the API contract.
+
+This authentication milestone does not add or redesign order ownership. The
+repository's existing order-user relationship and owned-order queries are
+preserved unchanged; extending identity into new order workflows is outside
+this milestone so authentication changes cannot silently alter commerce
+semantics.
+
 ### Django REST Framework
 
 Django REST Framework (DRF) is the HTTP boundary around the domain. It provides authentication and permission policies, request validation, serialization, pagination, filtering, and

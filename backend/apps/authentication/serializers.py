@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 from rest_framework.validators import UniqueValidator
@@ -19,6 +21,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(
         write_only=True,
     )
+    password_confirmation = serializers.CharField(write_only=True)
 
     class Meta:
         model = User
@@ -26,10 +29,25 @@ class RegisterSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "password",
+            "password_confirmation",
         ]
         read_only_fields = ["id"]
 
+    def validate(self, attrs):
+        if attrs["password"] != attrs["password_confirmation"]:
+            raise serializers.ValidationError(
+                {"password_confirmation": "Passwords do not match."}
+            )
+
+        candidate = User(email=attrs["email"])
+        try:
+            validate_password(attrs["password"], user=candidate)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError({"password": list(error.messages)}) from error
+        return attrs
+
     def create(self, validated_data):
+        validated_data.pop("password_confirmation")
         user = User.objects.create_user(**validated_data)
 
         return user
@@ -43,6 +61,7 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "first_name",
             "last_name",
+            "is_staff",
             "telegram_username",
             "telegram_language_code",
             "date_joined",
