@@ -1,11 +1,15 @@
+import logging
 from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
+from kombu.exceptions import OperationalError
 
 from apps.games.models import LicenseKey, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order, OrderItem, Payment
+
+logger = logging.getLogger(__name__)
 
 
 @transaction.atomic
@@ -44,7 +48,6 @@ def payable_total(order: Order) -> Decimal:
 
 @transaction.atomic
 def pay_order(order_id: int) -> Order:
-
     order = Order.objects.select_for_update().get(id=order_id)
 
     if order.status == Order.Status.PAID:
@@ -87,5 +90,21 @@ def pay_order(order_id: int) -> Order:
         amount=price_paid,
         paid_at=paid_at,
     )
+
+    committed_order_id = order.pk
+
+    def dispatch_confirmation_email(order_id=committed_order_id):
+        from apps.orders.tasks import send_order_confirmation_email
+
+        try:
+            send_order_confirmation_email.delay(order_id)
+        except OperationalError:
+            logger.exception(
+                "Order confirmation email could not be queued; order_id=%s",
+                order_id,
+                extra={"order_id": order_id},
+            )
+
+    transaction.on_commit(dispatch_confirmation_email)
 
     return order
