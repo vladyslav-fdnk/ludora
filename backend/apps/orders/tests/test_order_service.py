@@ -2,7 +2,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.db import transaction
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from kombu.exceptions import OperationalError
 
@@ -10,6 +10,8 @@ from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order, Payment
 from apps.orders.services import pay_order
+from apps.payments.exceptions import PaymentProviderError
+from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
 
 
 class OrderServiceTests(TestCase):
@@ -65,6 +67,232 @@ class OrderServiceTests(TestCase):
             LicenseKey.Status.SOLD,
         )
         dispatch_email.assert_called_once_with(order.id)
+
+    def test_pay_order_reuses_created_payment(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.CREATED,
+            amount=Decimal("59.99"),
+        )
+
+        pay_order(order.id)
+
+        payment.refresh_from_db()
+        self.assertEqual(Payment.objects.filter(order=order).count(), 1)
+        self.assertEqual(payment.status, Payment.Status.PAID)
+        self.assertEqual(payment.provider, "local")
+        self.assertTrue(payment.transaction_id.startswith("local-pay-"))
+
+    @override_settings(PAYMENT_PROVIDER="changed-default")
+    def test_existing_transaction_uses_its_stored_provider(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.CREATED,
+            amount=Decimal("59.99"),
+            provider="local",
+            transaction_id="local-pay-existing",
+        )
+
+        pay_order(order.id)
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.PAID)
+
+    def test_matching_injected_provider_confirms_existing_transaction(self):
+        class RecordingProvider:
+            name = "recording"
+
+            def __init__(self):
+                self.confirmed = []
+
+            def create_payment(self, request):
+                raise AssertionError("not called")
+
+            def confirm_payment(self, external_id):
+                self.confirmed.append(external_id)
+                return LocalPaymentProvider().confirm_payment(
+                    "local-pay-recording"
+                )
+
+        provider = RecordingProvider()
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        Payment.objects.create(
+            order=order,
+            status=Payment.Status.CREATED,
+            amount=Decimal("59.99"),
+            provider=provider.name,
+            transaction_id="recording-payment-1",
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            pay_order(order.id, provider=provider)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(provider.confirmed, ["recording-payment-1"])
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertEqual(order.license_key, self.license_key)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
+        dispatch_email.assert_called_once_with(order.id)
+
+    def test_mismatched_injected_provider_is_rejected_before_confirmation(self):
+        class UnexpectedProvider:
+            name = "other"
+
+            def create_payment(self, request):
+                raise AssertionError("not called")
+
+            def confirm_payment(self, external_id):
+                raise AssertionError("not called")
+
+        order, payment = self._existing_payment(provider="local")
+
+        self._assert_provider_configuration_failure_preserves_state(
+            order,
+            payment,
+            provider=UnexpectedProvider(),
+        )
+
+    def test_existing_transaction_without_provider_fails_safely(self):
+        order, payment = self._existing_payment(provider="")
+
+        self._assert_provider_configuration_failure_preserves_state(
+            order,
+            payment,
+        )
+
+    def test_unsupported_stored_provider_fails_safely(self):
+        order, payment = self._existing_payment(
+            provider="private-provider-name"
+        )
+
+        error = self._assert_provider_configuration_failure_preserves_state(
+            order,
+            payment,
+        )
+
+        self.assertNotIn("private-provider-name", str(error))
+        self.assertNotIn("existing-transaction-secret", str(error))
+
+    def _existing_payment(self, *, provider):
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.CREATED,
+            amount=Decimal("59.99"),
+            provider=provider,
+            transaction_id="existing-transaction-secret",
+        )
+        return order, payment
+
+    def _assert_provider_configuration_failure_preserves_state(
+        self,
+        order,
+        payment,
+        *,
+        provider=None,
+    ):
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ) as dispatch_email:
+            with self.assertRaisesMessage(
+                OrderPaymentError,
+                "Payment provider configuration is invalid",
+            ) as error:
+                pay_order(order.id, provider=provider)
+
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertIsNone(order.license_key)
+        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertEqual(
+            self.license_key.status,
+            LicenseKey.Status.AVAILABLE,
+        )
+        dispatch_email.assert_not_called()
+        return error.exception
+
+    def test_rejected_provider_marks_payment_failed_without_fulfilment(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        provider = LocalPaymentProvider(
+            confirmation=LocalConfirmation.REJECT
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.assertRaisesMessage(
+                OrderPaymentError,
+                "Payment was rejected",
+            ),
+        ):
+            pay_order(order.id, provider=provider)
+
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertIsNone(order.license_key)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        dispatch_email.assert_not_called()
+
+    def test_provider_exception_is_safe_and_rolls_back_local_state(self):
+        class FailingProvider:
+            name = "failing"
+
+            def create_payment(self, request):
+                raise PaymentProviderError("credential-like private detail")
+
+            def confirm_payment(self, external_id):
+                raise AssertionError("not called")
+
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Payment provider could not confirm payment",
+        ) as error:
+            pay_order(order.id, provider=FailingProvider())
+
+        self.assertNotIn("private detail", str(error.exception))
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.license_key.refresh_from_db()
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
 
     def test_email_is_dispatched_only_after_payment_transaction_commits(self):
         order = Order.objects.create(

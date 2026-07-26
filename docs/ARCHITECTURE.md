@@ -153,18 +153,21 @@ backend/
     ├── games/               # Catalogue and license-key inventory
     ├── carts/               # Mutable shopping intent and checkout
     ├── orders/              # Orders, snapshots, payments and fulfilment
-    ├── payments/            # Placeholder for a future provider integration
+    ├── payments/            # Provider contract, selection and local simulation
     └── permissions.py       # Shared staff permission
 ```
 
-Domain applications keep ownership visible. `games` owns sellable products and keys; `carts` owns pre-purchase intent; `orders` owns historical purchases and the current payment
-implementation. Authentication is separate from the user model because issuing credentials and representing an identity are different responsibilities.
+Domain applications keep ownership visible. `games` owns sellable products and keys; `carts` owns pre-purchase intent; `orders` owns historical purchases and payment orchestration;
+`payments` owns the provider boundary and deterministic local simulation. Authentication is separate from the user model because issuing credentials and representing an identity
+are different responsibilities.
 
 The split avoids one undifferentiated application while remaining a modular monolith. All domains share one Django process and one database, so cross-domain transactions are
 straightforward. This is appropriate for the current scale: the system gains clear boundaries without distributed transactions or operational complexity.
 
-The `payments` app is intentionally only a placeholder. The implemented `Payment` model and payment services still live in `orders`, where they can participate in the order and
-licence fulfilment transaction.
+The implemented `Payment` model and orchestration services remain in `orders`,
+where they participate in the order and licence fulfilment transaction. The
+provider code deliberately has no Django model, DRF, email, Celery, inventory,
+or user dependencies.
 
 ## Request lifecycle
 
@@ -258,7 +261,7 @@ flowchart LR
     C --> CO[Checkout]
     CO --> CRO[Cart order]
     D --> CP[Create payment]
-    CP --> SP[Simulated payment]
+    CP --> SP[Local provider confirmation]
     SP --> K[Assign available license key]
     K --> PAID[Paid direct order]
     CRO --> U[Unpaid order]
@@ -330,14 +333,43 @@ financial data.
 
 ## Payments
 
-Payment handling currently has two related operations. `create_payment` creates a `CREATED` payment record for an eligible, owned direct order. It snapshots the order's
-authoritative total as the payment amount and prevents another active `CREATED` or `PENDING` payment for the same order.
+Payment handling has two related operations. `create_payment` creates a
+`CREATED` payment record for an eligible, owned direct order, asks the selected
+provider to create its provider-side representation, and stores the provider
+name and safe reference in existing model fields. It snapshots the order's
+authoritative total and prevents another active `CREATED` or `PENDING` payment.
 
-`pay_order` is a separate simulated execution path. It locks the order, selects an available license key for its product under a lock, marks the key sold, marks the order paid,
-records `price_paid` and timestamps, and creates a `PAID` payment record.
+The provider contract accepts a small immutable creation request and returns an
+immutable provider payment containing only an external identifier and normalized
+`PENDING`, `SUCCEEDED`, or `FAILED` status. It never receives an `Order`, user,
+request, license key, or serializer. `get_payment_provider()` selects the
+internal `PAYMENT_PROVIDER` Django setting for new transactions or resolves an
+explicit stored name for existing transactions. Unsupported or empty explicit
+names never fall back to the default. Services also accept an explicit provider,
+making the boundary replaceable in tests without mutable global state.
 
-Each operation runs inside `transaction.atomic`. If validation fails, inventory is unavailable, or any database write fails, the transaction rolls back. A license key cannot be
-consumed while leaving the order unpaid, and a payment cannot survive a failed fulfilment sequence.
+`LocalPaymentProvider` is the default. It deterministically derives a synthetic
+`local-pay-...` reference from the service idempotency key, needs no credentials
+or network, and deterministically confirms or rejects. It is simulation only,
+not a gateway or production payment integration.
+
+`pay_order` reuses an active payment where one exists or creates one for the
+backward-compatible direct-pay command. A payment with a provider transaction is
+always confirmed through its stored provider; injected providers must have the
+same name. Missing, unsupported, or mismatched provider ownership is rejected
+with a stable domain error. Only the order service interprets the normalized
+result. On success it locks an available license key, marks the key
+sold, marks the payment and order paid, and records the shared paid timestamp.
+On rejection the payment becomes `FAILED` while the order and inventory remain
+unchanged, allowing the established retry behavior.
+
+The orchestration service owns `transaction.atomic`, row locks, local state
+changes, and post-commit work. If validation fails, inventory is unavailable,
+the provider raises, or a database write fails, local changes roll back. A
+license key cannot be consumed while leaving the order unpaid. The local
+provider call is currently inside this transaction because it is in-process and
+non-blocking. A future network provider must use a phased flow so database locks
+are not held across slow network I/O.
 
 After `pay_order` has completed all database writes, it registers a
 `transaction.on_commit` callback with the immutable order primary key. Only a
@@ -354,8 +386,10 @@ not complete delivery idempotency: broker redelivery or a retry after an
 ambiguous SMTP outcome could still send a duplicate. A stronger delivery ledger
 or provider idempotency mechanism is deferred to a later milestone.
 
-There is no external payment provider. Provider and transaction identifier fields exist for future integration, but no gateway call, redirect, webhook, or provider reconciliation is
-implemented.
+There is no external payment provider. The abstraction adds no gateway SDK,
+credentials, redirect, webhook, refund, or reconciliation behavior. Webhooks
+and asynchronous reconciliation are deferred until a real provider and its
+state machine exist.
 
 ## Concurrency
 
@@ -368,7 +402,9 @@ cart. Concurrent quantity changes are either included in the snapshot or receive
 Payment creation locks and reloads the order before checking its current status and active payments. This prevents two concurrent requests from both passing a stale precondition and
 creating duplicate in-progress payments.
 
-Simulated payment also locks the order and the selected available license key. That prevents duplicate payment of one order and prevents two sales from allocating the same key.
+Payment confirmation locks the order, an active payment when present, and the
+selected available license key. That prevents duplicate payment of one order,
+duplicate email scheduling, and two sales from allocating the same key.
 
 Lock ordering matters because transactions touching the same rows in different orders increase deadlock risk. The current services consistently acquire the cart or order first, then
 dependent rows. Database uniqueness constraints remain the final safeguard for one cart per user and one product line per cart.
@@ -494,12 +530,12 @@ The following limitations are visible in the current repository:
 - cart orders cannot yet be paid or assigned license keys;
 - no refunds, cancellations, or returns workflow;
 - no payment webhooks or reconciliation;
-- no background workers or task queue;
+- no payment reconciliation worker;
 - no Redis or shared bot token/session storage;
 - bot tokens and language preferences are lost on restart and cannot be shared
   safely across bot replicas;
 - no inventory reservation timeout or checkout reservation lifecycle;
-- no email notification or bot-based license delivery;
+- no bot-based license delivery;
 - no production deployment configuration or automated deployment pipeline;
 - the GitHub Actions workflow validates the backend and bot independently;
 - no application monitoring, tracing, or structured observability stack;
@@ -509,8 +545,11 @@ These are boundaries of the current implementation, not hidden features implied 
 
 ## Future evolution
 
-A realistic next step is to introduce Stripe or PayU behind a provider adapter. Payment creation would initiate a provider transaction, while authenticated, idempotent webhooks
-would advance payment and order state. Cart orders would need multi-item fulfilment rather than the current single-key direct path.
+A realistic next step is to implement a real gateway behind the provider
+contract. Payment creation would initiate its transaction without holding
+database locks across network I/O, while authenticated, idempotent webhooks
+would advance local state and reconcile ambiguous results. Cart orders would
+need multi-item fulfilment rather than the current single-key direct path.
 
 Celery could move email delivery, provider reconciliation, and other retryable work outside request latency. Redis could serve as the broker and provide shared short-lived bot
 state, but durable commerce state would remain in PostgreSQL.

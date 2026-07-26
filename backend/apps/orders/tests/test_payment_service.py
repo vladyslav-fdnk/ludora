@@ -13,6 +13,11 @@ from apps.orders.models import (
     Payment,
 )
 from apps.orders.payment_services import create_payment
+from apps.payments.exceptions import PaymentProviderError
+from apps.payments.providers import (
+    LocalPaymentProvider,
+    ProviderPayment,
+)
 
 
 class PaymentServiceTests(TestCase):
@@ -49,6 +54,48 @@ class PaymentServiceTests(TestCase):
             payment.amount,
             Decimal("59.99"),
         )
+        self.assertEqual(payment.provider, "local")
+        self.assertEqual(
+            payment.transaction_id,
+            f"local-pay-payment-{payment.pk}",
+        )
+
+    def test_provider_can_be_injected_without_patching_service_internals(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        provider = LocalPaymentProvider()
+
+        payment = create_payment(order, provider=provider)
+
+        self.assertEqual(payment.provider, provider.name)
+
+    def test_provider_failure_is_translated_and_rolls_back_payment(self):
+        class FailingProvider:
+            name = "failing"
+
+            def create_payment(self, request):
+                raise PaymentProviderError("private provider detail")
+
+            def confirm_payment(self, external_id) -> ProviderPayment:
+                raise AssertionError("not called")
+
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Payment provider could not create payment",
+        ) as error:
+            create_payment(order, provider=FailingProvider())
+
+        self.assertNotIn("private provider detail", str(error.exception))
+        self.assertFalse(Payment.objects.filter(order=order).exists())
 
     def test_missing_total_is_rejected_without_creating_payment(self):
         order = Order.objects.create(product=self.product, email="legacy@test.com")

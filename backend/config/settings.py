@@ -17,6 +17,7 @@ SECRET_KEY = os.getenv(
 )
 DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
 BOT_INTERNAL_SECRET = os.getenv("BOT_INTERNAL_SECRET", "")
+PAYMENT_PROVIDER = "local"
 
 
 def get_list_env(name: str) -> list[str]:

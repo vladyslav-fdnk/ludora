@@ -32,6 +32,8 @@ below summarize how the portfolio project evolved.
   product snapshots, regular-user ownership scoping, and staff-wide visibility.
 - Payment records and a local simulated payment flow for direct orders,
   including license-key assignment. No external payment provider is connected.
+- A typed payment-provider contract, deterministic local provider, and
+  settings-backed provider selection with explicit test injection.
 - A persistent authenticated cart with product addition, quantity updates,
   removal, clearing, and checkout.
 - Atomic multi-item checkout that preserves product and price details before
@@ -57,6 +59,9 @@ below summarize how the portfolio project evolved.
 
 ### Changed
 
+- Payment creation and direct-order confirmation now orchestrate through the
+  provider boundary while preserving endpoint payloads, transactional
+  fulfilment, retry rules, and post-commit email dispatch.
 - Orders now support both direct purchases and multi-product cart checkout
   through immutable item snapshots. The legacy `product` field remains on
   compatible direct-order responses.
