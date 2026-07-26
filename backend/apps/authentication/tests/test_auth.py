@@ -9,15 +9,24 @@ User = get_user_model()
 
 
 class RegisterTests(APITestCase):
-    def test_registration_requires_only_email_and_password(self):
+    def test_valid_registration_hashes_password_and_returns_safe_user(self):
         response = self.client.post(
             "/api/auth/register/",
-            {"email": "vlad@test.com", "password": "password123"},
+            {
+                "email": "new-user@example.com",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Ludora!SafePass2026",
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertTrue(User.objects.filter(email="vlad@test.com").exists())
+        user = User.objects.get(email="new-user@example.com")
+        self.assertTrue(user.check_password("Ludora!SafePass2026"))
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("password_confirmation", response.data)
         self.assertNotIn("username", response.data)
 
     def test_duplicate_email_returns_bad_request(self):
@@ -25,7 +34,11 @@ class RegisterTests(APITestCase):
 
         response = self.client.post(
             "/api/auth/register/",
-            {"email": "vlad@test.com", "password": "password123"},
+            {
+                "email": "vlad@test.com",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Ludora!SafePass2026",
+            },
             format="json",
         )
 
@@ -36,11 +49,77 @@ class RegisterTests(APITestCase):
 
         response = self.client.post(
             "/api/auth/register/",
-            {"email": "vlad@test.com", "password": "password123"},
+            {
+                "email": "vlad@test.com",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Ludora!SafePass2026",
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_password_confirmation_mismatch_is_rejected(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "email": "new-user@example.com",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Different!SafePass2026",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password_confirmation", response.data)
+        self.assertFalse(User.objects.exists())
+
+    def test_invalid_email_is_rejected(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "email": "not-an-email",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Ludora!SafePass2026",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
+
+    def test_weak_password_is_rejected_by_django_validators(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "email": "new-user@example.com",
+                "password": "password",
+                "password_confirmation": "password",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("password", response.data)
+        self.assertFalse(User.objects.exists())
+
+    def test_registration_cannot_set_privilege_fields(self):
+        response = self.client.post(
+            "/api/auth/register/",
+            {
+                "email": "new-user@example.com",
+                "password": "Ludora!SafePass2026",
+                "password_confirmation": "Ludora!SafePass2026",
+                "is_staff": True,
+                "is_superuser": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        user = User.objects.get()
+        self.assertFalse(user.is_staff)
+        self.assertFalse(user.is_superuser)
 
 
 class LoginTests(APITestCase):
@@ -52,7 +131,7 @@ class LoginTests(APITestCase):
 
     def test_user_can_login(self):
         response = self.client.post(
-            "/api/auth/login/",
+            "/api/auth/token/",
             {"email": "vlad@test.com", "password": "password123"},
             format="json",
         )
@@ -63,7 +142,7 @@ class LoginTests(APITestCase):
 
     def test_login_rejects_invalid_password(self):
         response = self.client.post(
-            "/api/auth/login/",
+            "/api/auth/token/",
             {"email": "vlad@test.com", "password": "incorrect-password"},
             format="json",
         )
@@ -72,7 +151,7 @@ class LoginTests(APITestCase):
 
     def test_login_rejects_unknown_email(self):
         response = self.client.post(
-            "/api/auth/login/",
+            "/api/auth/token/",
             {"email": "unknown@test.com", "password": "password123"},
             format="json",
         )
@@ -83,13 +162,20 @@ class LoginTests(APITestCase):
         refresh = RefreshToken.for_user(self.user)
 
         response = self.client.post(
-            "/api/auth/refresh/",
+            "/api/auth/token/refresh/",
             {"refresh": str(refresh)},
             format="json",
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn("access", response.data)
+
+    def test_malformed_access_token_is_rejected(self):
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer malformed-token")
+
+        response = self.client.get("/api/auth/me/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_existing_protected_endpoint_accepts_jwt(self):
         access = RefreshToken.for_user(self.user).access_token
@@ -120,12 +206,28 @@ class MeTests(APITestCase):
                 "email": "vlad@test.com",
                 "first_name": "",
                 "last_name": "",
+                "is_staff": False,
                 "telegram_username": "",
                 "telegram_language_code": "",
                 "date_joined": response.data["date_joined"],
             },
         )
         self.assertNotIn("username", response.data)
+        self.assertEqual(
+            set(response.data),
+            {
+                "id",
+                "email",
+                "first_name",
+                "last_name",
+                "is_staff",
+                "telegram_username",
+                "telegram_language_code",
+                "date_joined",
+            },
+        )
+        self.assertNotIn("password", response.data)
+        self.assertNotIn("is_superuser", response.data)
 
     def test_anonymous_user_cannot_get_profile(self):
         response = self.client.get("/api/auth/me/")
@@ -138,7 +240,7 @@ class OpenAPITests(APITestCase):
         response = self.client.get("/api/schema/", HTTP_ACCEPT="application/json")
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        for route in ("/api/auth/login/", "/api/auth/register/"):
+        for route in ("/api/auth/token/", "/api/auth/register/"):
             operation = response.data["paths"][route]["post"]
             request_schema = operation["requestBody"]["content"]["application/json"][
                 "schema"
@@ -151,6 +253,21 @@ class OpenAPITests(APITestCase):
             self.assertIn("email", properties)
             self.assertIn("password", properties)
             self.assertNotIn("username", properties)
+
+    def test_openapi_exposes_bearer_authentication_and_protected_operations(self):
+        response = self.client.get("/api/schema/", HTTP_ACCEPT="application/json")
+
+        schemes = response.data["components"]["securitySchemes"]
+        self.assertEqual(schemes["jwtAuth"]["type"], "http")
+        self.assertEqual(schemes["jwtAuth"]["scheme"], "bearer")
+        self.assertIn(
+            {"jwtAuth": []},
+            response.data["paths"]["/api/auth/me/"]["get"]["security"],
+        )
+        self.assertIn(
+            {"jwtAuth": []},
+            response.data["paths"]["/api/products/create/"]["post"]["security"],
+        )
 
 
 @override_settings(BOT_INTERNAL_SECRET="test-placeholder-secret")

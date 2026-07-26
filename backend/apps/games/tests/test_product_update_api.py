@@ -105,3 +105,53 @@ class ProductUpdateAPIViewTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
         self.product.refresh_from_db()
         self.assertEqual(str(self.product.price), "59.99")
+
+    def test_anonymous_user_cannot_replace_product(self):
+        response = self.client.put(
+            reverse("games:product-update", kwargs={"pk": self.product.id}),
+            self.replacement_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_authenticated_non_staff_user_cannot_replace_product(self):
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.put(
+            reverse("games:product-update", kwargs={"pk": self.product.id}),
+            self.replacement_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_staff_user_can_replace_product(self):
+        staff_user = User.objects.create_user(
+            email="staff-replace@example.com",
+            password="password123",
+            is_staff=True,
+        )
+        self.client.force_authenticate(user=staff_user)
+
+        response = self.client.put(
+            reverse("games:product-update", kwargs={"pk": self.product.id}),
+            self.replacement_payload(),
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.title, "Updated Game")
+
+    def replacement_payload(self):
+        return {
+            "title": "Updated Game",
+            "slug": "updated-game",
+            "description": "Updated description",
+            "product_type": Product.ProductType.GAME,
+            "platform": self.platform.id,
+            "categories": [],
+            "price": "39.99",
+            "is_active": True,
+        }

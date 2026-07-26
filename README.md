@@ -105,11 +105,33 @@ Product-list query parameters include `platform`, `product_type`, `categories`,
 
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/register/` | Public | Register with email and password |
-| `POST` | `/api/auth/login/` | Public | Obtain an access/refresh token pair |
-| `POST` | `/api/auth/refresh/` | Refresh token | Obtain a new access token |
+| `POST` | `/api/auth/register/` | Public | Register with email, password, and password confirmation |
+| `POST` | `/api/auth/token/` | Public | Obtain an access/refresh token pair |
+| `POST` | `/api/auth/token/refresh/` | Refresh token | Obtain a new access token |
 | `GET` | `/api/auth/me/` | JWT | Return the current user |
 | `POST` | `/api/auth/telegram/` | Internal secret | Synchronize a Telegram user and issue JWTs |
+
+Registration accepts `email`, `password`, and `password_confirmation`. It
+validates the email, enforces case-insensitive uniqueness, runs Django's
+configured password validators, and always creates a non-staff account. It does
+not issue tokens; obtain them from `/api/auth/token/` after registration.
+
+Send an access token to protected endpoints with the HTTP header:
+
+```text
+Authorization: Bearer <access-token>
+```
+
+The product list and detail endpoints are public. Product create, replace,
+partial-update, and delete endpoints require an authenticated user with
+`is_staff=True`. Create a local staff administrator with:
+
+```bash
+docker compose exec backend uv run python manage.py createsuperuser
+```
+
+The legacy `/api/auth/login/` and `/api/auth/refresh/` aliases remain available
+for the existing Telegram client.
 
 The Telegram endpoint expects the shared secret in the
 `X-Bot-Internal-Secret` header. It is intended for the bot, not as a public

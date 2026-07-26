@@ -23,6 +23,8 @@ below summarize how the portfolio project evolved.
   deactivation.
 - Email-based registration, JWT authentication and refresh, user profiles, and
   protected Telegram identity synchronization.
+- Canonical JWT token and refresh endpoints, password-confirmed registration
+  using Django password validation, and Swagger bearer-token authorization.
 - Direct and cart-based orders with generated `LUD-...` order numbers,
   authoritative totals, and item snapshots that preserve title, quantity, and
   unit price at purchase time.
@@ -99,6 +101,8 @@ below summarize how the portfolio project evolved.
   intended owner.
 - Protected product write operations with staff permissions and the Telegram
   identity synchronization endpoint with a shared internal secret.
+- Prevented registration from accepting privilege flags and covered anonymous,
+  regular-user, and staff authorization for every product write method.
 - Enforced database-level financial, quantity, uniqueness, cart ownership, and
   cart-order integrity rules.
 - Added migration-time validation that stops financial constraints from being
