@@ -30,8 +30,9 @@ The Django backend is split into domain apps. Order and payment rules are kept i
 service modules, while API views handle HTTP concerns. The bot separates API,
 authentication, handlers, localization, keyboards, and presentation code.
 
-The `payments` Django app is currently a placeholder; the implemented `Payment`
-model and payment-related service logic live in the `orders` app.
+The `payments` Django app owns a small provider interface, provider selection,
+and the deterministic local provider. The `Payment` model and payment
+orchestration remain in `orders`, alongside order and fulfilment rules.
 
 ## Implemented Functionality
 
@@ -71,14 +72,15 @@ Backend models, APIs, and service logic already support:
 - Paginated order history scoped to the authenticated user, with staff-wide
   visibility and secure individual-order retrieval.
 - Creating payment records for owned orders.
-- A simulated payment operation that assigns an available license key and marks
-  the order as paid.
+- A provider-backed local payment simulation that assigns an available license
+  key and marks the order as paid.
 - An asynchronous plain-text order confirmation containing purchased products
   and the assigned license key after successful direct-order payment.
 
 Cart checkout creates an order but intentionally creates no payment and assigns
-no license key. The legacy simulated payment flow remains available only for
-direct single-product orders. External payments, payment of cart orders, and
+no license key. The deterministic local payment provider remains available only
+for direct single-product orders. It requires no network or credentials and is
+not a real payment gateway. External payments, payment of cart orders, and
 license-key delivery through the bot are not implemented.
 
 ## API
@@ -148,6 +150,16 @@ client login endpoint.
 | `GET` | `/api/orders/my/` | JWT | Backward-compatible alias for the order list |
 | `POST` | `/api/orders/<id>/pay/` | JWT | Run the simulated payment flow |
 | `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
+
+These endpoint paths, request bodies, responses, and status codes are unchanged.
+New payment transactions select the internal `PAYMENT_PROVIDER` setting, whose
+safe default is `local`; clients cannot choose a provider. Existing transactions
+are always confirmed through their stored provider name, and an explicitly
+injected provider with a different name is rejected. The local provider
+creates deterministic synthetic references and confirms without contacting a
+network. Successful confirmation still assigns one available key transactionally
+and queues the order email only after commit. A future provider can implement
+the same interface, but no production gateway is integrated.
 
 Regular users see only orders whose `user` ownership field identifies their
 account. Staff users can list and retrieve all orders, including guest orders.
@@ -343,7 +355,7 @@ ludora/
 │   │   ├── carts/           # Persistent carts, cart items, checkout API/services
 │   │   ├── games/           # Products, platforms, categories, and license keys
 │   │   ├── orders/          # Orders, order items, payments, APIs, and services
-│   │   ├── payments/        # Placeholder for future provider integration
+│   │   ├── payments/        # Provider contract and local payment simulation
 │   │   └── users/           # Custom email-based user model
 │   ├── config/              # Django settings, Celery app, and root URLs
 │   ├── manage.py
