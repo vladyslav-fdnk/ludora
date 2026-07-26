@@ -72,6 +72,8 @@ Backend models, APIs, and service logic already support:
 - Creating payment records for owned orders.
 - A simulated payment operation that assigns an available license key and marks
   the order as paid.
+- An asynchronous plain-text order confirmation containing purchased products
+  and the assigned license key after successful direct-order payment.
 
 Cart checkout creates an order but intentionally creates no payment and assigns
 no license key. The legacy simulated payment flow remains available only for
@@ -209,7 +211,18 @@ docker compose exec backend uv run python manage.py shell -c \
 ```
 
 The worker log records `Celery diagnostic task executed` with the diagnostic
-message. This task is intentionally independent of commerce workflows.
+message.
+
+Successful simulated direct-order payments also queue an order confirmation
+after the database transaction commits. The local default is Django's console
+email backend, so the complete email appears in the Celery worker output:
+
+```bash
+docker compose logs -f celery_worker
+```
+
+Set the SMTP-related email environment variables only when connecting an SMTP
+server. No SMTP server is included in Docker Compose.
 
 ### Tests
 
@@ -259,6 +272,14 @@ secrets.
 | `POSTGRES_HOST` | PostgreSQL host name |
 | `POSTGRES_PORT` | PostgreSQL port |
 | `CELERY_BROKER_URL` | Celery broker URL; Compose uses the `redis` service |
+| `EMAIL_BACKEND` | Django email backend; defaults to console output |
+| `EMAIL_HOST` | SMTP host when using Django's SMTP backend |
+| `EMAIL_PORT` | SMTP port |
+| `EMAIL_HOST_USER` | Optional SMTP username |
+| `EMAIL_HOST_PASSWORD` | Optional SMTP password |
+| `EMAIL_USE_TLS` | Enables SMTP STARTTLS when set to `True` |
+| `EMAIL_TIMEOUT` | Email connection timeout in seconds |
+| `DEFAULT_FROM_EMAIL` | Sender used for transactional order email |
 | `BOT_TOKEN` | Telegram Bot API token |
 | `BOT_BACKEND_BASE_URL` | Backend base URL used by the bot |
 | `BOT_API_TIMEOUT` | Backend request timeout in seconds |

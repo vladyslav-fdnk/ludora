@@ -44,6 +44,9 @@ below summarize how the portfolio project evolved.
   bot.
 - A Redis broker, separate Celery worker, Django Celery application, and
   diagnostic task with broker-free eager tests.
+- Post-commit Celery order confirmations for successful simulated payments,
+  containing purchased product details and assigned license keys through
+  environment-configured Django email.
 - Automated backend and bot test suites covering APIs, permissions, migrations,
   schemas, transactions, concurrency, authentication, localization, and UI
   presentation.

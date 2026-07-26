@@ -284,6 +284,21 @@ records `price_paid` and timestamps, and creates a `PAID` payment record.
 Each operation runs inside `transaction.atomic`. If validation fails, inventory is unavailable, or any database write fails, the transaction rolls back. A license key cannot be
 consumed while leaving the order unpaid, and a payment cannot survive a failed fulfilment sequence.
 
+After `pay_order` has completed all database writes, it registers a
+`transaction.on_commit` callback with the immutable order primary key. Only a
+successful outermost commit publishes the Celery order-confirmation task. The
+worker reloads the committed order, payment, item snapshots, and assigned key,
+checks that the order is still eligible, then sends a plain-text message through
+Django's email facilities. SMTP availability and task execution are outside the
+payment transaction, so an email or broker failure cannot roll back or corrupt a
+completed payment.
+
+The locked transition from an unpaid order to `PAID` prevents repeated payment
+requests from scheduling another confirmation. This is dispatch idempotency,
+not complete delivery idempotency: broker redelivery or a retry after an
+ambiguous SMTP outcome could still send a duplicate. A stronger delivery ledger
+or provider idempotency mechanism is deferred to a later milestone.
+
 There is no external payment provider. Provider and transaction identifier fields exist for future integration, but no gateway call, redirect, webhook, or provider reconciliation is
 implemented.
 

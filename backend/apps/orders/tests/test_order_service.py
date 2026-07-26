@@ -1,8 +1,10 @@
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db import transaction
 from django.test import TestCase
 from django.utils import timezone
+from kombu.exceptions import OperationalError
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
@@ -37,7 +39,13 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
-        pay_order(order.id)
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            pay_order(order.id)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -56,6 +64,123 @@ class OrderServiceTests(TestCase):
             self.license_key.status,
             LicenseKey.Status.SOLD,
         )
+        dispatch_email.assert_called_once_with(order.id)
+
+    def test_email_is_dispatched_only_after_payment_transaction_commits(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ) as dispatch_email:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                pay_order(order.id)
+                dispatch_email.assert_not_called()
+
+            self.assertEqual(len(callbacks), 1)
+            callbacks[0]()
+            dispatch_email.assert_called_once_with(order.id)
+
+    def test_rolled_back_payment_does_not_dispatch_email(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ) as dispatch_email:
+            with self.assertRaisesMessage(RuntimeError, "force rollback"):
+                with transaction.atomic():
+                    pay_order(order.id)
+                    raise RuntimeError("force rollback")
+
+        dispatch_email.assert_not_called()
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+
+    def test_broker_failure_after_commit_does_not_corrupt_completed_payment(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay",
+                side_effect=OperationalError("broker unavailable"),
+            ),
+            self.assertLogs("apps.orders.services", level="ERROR") as logs,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            paid_order = pay_order(order.id)
+
+        paid_order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(paid_order.status, Order.Status.PAID)
+        self.assertEqual(paid_order.license_key, self.license_key)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
+        self.assertTrue(
+            Payment.objects.filter(
+                order=paid_order,
+                status=Payment.Status.PAID,
+            ).exists()
+        )
+        log_output = "\n".join(logs.output)
+        self.assertNotIn(self.license_key.value, log_output)
+        self.assertNotIn(order.email, log_output)
+
+    def test_insufficient_inventory_does_not_schedule_email(self):
+        self.license_key.delete()
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.assertRaisesMessage(OrderPaymentError, "No keys available"),
+        ):
+            pay_order(order.id)
+
+        dispatch_email.assert_not_called()
+
+    def test_duplicate_completed_payment_does_not_schedule_another_email(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            pay_order(order.id)
+        dispatch_email.assert_called_once_with(order.id)
+        dispatch_email.reset_mock()
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as duplicate_dispatch,
+            self.assertRaisesMessage(OrderPaymentError, "Already paid"),
+        ):
+            pay_order(order.id)
+
+        duplicate_dispatch.assert_not_called()
 
     def test_cannot_pay_already_paid_order(self):
         order = Order.objects.create(
