@@ -7,8 +7,8 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
 
-from apps.games.admin import LicenseKeyAdmin, ProductAdmin
-from apps.games.models import LicenseKey, Platform, Product
+from apps.games.admin import LicenseKeyAdmin, ProductAdmin, mask_license_key
+from apps.games.models import Category, LicenseKey, Platform, Product
 
 User = get_user_model()
 
@@ -29,6 +29,10 @@ class ProductAdminTests(TestCase):
         self.request = RequestFactory().post("/")
         self.request.session = {}
         self.request._messages = FallbackStorage(self.request)
+        self.superuser = User.objects.create_superuser(
+            email="product-admin@example.com",
+            password="password123",
+        )
 
     def test_product_is_registered(self):
         self.assertIsInstance(admin.site._registry[Product], ProductAdmin)
@@ -59,15 +63,61 @@ class ProductAdminTests(TestCase):
         )
 
     def test_superuser_can_access_product_changelist(self):
-        superuser = User.objects.create_superuser(
-            email="admin@example.com",
-            password="password123",
-        )
-        self.client.force_login(superuser)
+        self.client.force_login(self.superuser)
 
         response = self.client.get(reverse("admin:games_product_changelist"))
 
         self.assertEqual(response.status_code, 200)
+
+    def test_changelist_displays_annotated_inventory_counts(self):
+        categories = [
+            Category.objects.create(name="Action", slug="action"),
+            Category.objects.create(name="Indie", slug="indie"),
+        ]
+        self.product.categories.add(*categories)
+        for status in (
+            LicenseKey.Status.AVAILABLE,
+            LicenseKey.Status.RESERVED,
+            LicenseKey.Status.SOLD,
+        ):
+            LicenseKey.objects.create(
+                product=self.product,
+                value=f"{status}-KEY-1234",
+                status=status,
+            )
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(reverse("admin:games_product_changelist"))
+
+        self.assertContains(response, "Available keys")
+        self.assertContains(response, "Sold keys")
+        self.assertContains(response, "Total keys")
+        row = response.context["cl"].result_list.get(pk=self.product.pk)
+        self.assertEqual(row._available_keys_count, 1)
+        self.assertEqual(row._sold_keys_count, 1)
+        self.assertEqual(row._total_keys_count, 3)
+
+    def test_change_page_has_masked_read_only_license_key_inline(self):
+        key = LicenseKey.objects.create(
+            product=self.product,
+            value="ABCD-PRIVATE-WXYZ",
+        )
+        self.client.force_login(self.superuser)
+
+        response = self.client.get(
+            reverse("admin:games_product_change", args=(self.product.pk,))
+        )
+
+        self.assertContains(response, "License keys")
+        self.assertContains(response, mask_license_key(key.value))
+        self.assertNotContains(response, key.value)
+        self.assertNotContains(response, 'name="license_keys-0-value"')
+        self.assertContains(
+            response,
+            'name="license_keys-MAX_NUM_FORMS" value="0"',
+            html=False,
+        )
+        self.assertNotContains(response, 'class="add-row"')
 
     def test_regular_user_cannot_access_admin(self):
         user = User.objects.create_user(
@@ -111,6 +161,8 @@ class LicenseKeyAdminTests(TestCase):
         self.assertTrue(masked.startswith("ABCD"))
         self.assertTrue(masked.endswith("WXYZ"))
         self.assertEqual(self.model_admin.masked_key(short_key), "•••••")
+        self.assertEqual(mask_license_key("12345678"), "••••••••")
+        self.assertEqual(mask_license_key(""), "")
 
     def test_key_without_order_safely_has_no_assigned_order(self):
         key = LicenseKey.objects.create(

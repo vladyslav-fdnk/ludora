@@ -1,6 +1,15 @@
 from django.contrib import admin
+from django.db.models import Count, Q
 
 from apps.games.models import Category, LicenseKey, Platform, Product
+
+
+def mask_license_key(value):
+    """Mask a license key while retaining enough context to identify it."""
+    value = value or ""
+    if len(value) <= 8:
+        return "•" * len(value)
+    return f"{value[:4]}{'•' * (len(value) - 8)}{value[-4:]}"
 
 
 @admin.register(Platform)
@@ -19,6 +28,32 @@ class CategoryAdmin(admin.ModelAdmin):
     ordering = ("name",)
 
 
+class LicenseKeyInline(admin.TabularInline):
+    model = LicenseKey
+    fields = ("masked_key", "status", "created_at", "sold_at", "assigned_order")
+    readonly_fields = fields
+    extra = 0
+    show_change_link = True
+    verbose_name_plural = "License keys"
+
+    @admin.display(description="Key")
+    def masked_key(self, obj):
+        return mask_license_key(obj.value)
+
+    @admin.display(description="Assigned order", ordering="order__order_number")
+    def assigned_order(self, obj):
+        return getattr(obj, "order", None)
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("order")
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
     list_display = (
@@ -26,6 +61,9 @@ class ProductAdmin(admin.ModelAdmin):
         "platform",
         "product_type",
         "price",
+        "available_keys_count",
+        "sold_keys_count",
+        "total_keys_count",
         "is_active",
         "created_at",
         "updated_at",
@@ -62,6 +100,38 @@ class ProductAdmin(admin.ModelAdmin):
         ("Timestamps", {"fields": ("created_at", "updated_at")}),
     )
     actions = ("activate_products", "deactivate_products")
+    inlines = (LicenseKeyInline,)
+
+    def get_queryset(self, request):
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(
+                _available_keys_count=Count(
+                    "license_keys",
+                    filter=Q(license_keys__status=LicenseKey.Status.AVAILABLE),
+                    distinct=True,
+                ),
+                _sold_keys_count=Count(
+                    "license_keys",
+                    filter=Q(license_keys__status=LicenseKey.Status.SOLD),
+                    distinct=True,
+                ),
+                _total_keys_count=Count("license_keys", distinct=True),
+            )
+        )
+
+    @admin.display(description="Available keys", ordering="_available_keys_count")
+    def available_keys_count(self, obj):
+        return obj._available_keys_count
+
+    @admin.display(description="Sold keys", ordering="_sold_keys_count")
+    def sold_keys_count(self, obj):
+        return obj._sold_keys_count
+
+    @admin.display(description="Total keys", ordering="_total_keys_count")
+    def total_keys_count(self, obj):
+        return obj._total_keys_count
 
     @admin.action(description="Activate selected products")
     def activate_products(self, request, queryset):
@@ -86,10 +156,7 @@ class LicenseKeyAdmin(admin.ModelAdmin):
 
     @admin.display(description="Key")
     def masked_key(self, obj):
-        value = obj.value
-        if len(value) <= 8:
-            return "•" * len(value)
-        return f"{value[:4]}{'•' * (len(value) - 8)}{value[-4:]}"
+        return mask_license_key(obj.value)
 
     @admin.display(boolean=True, description="Sold", ordering="status")
     def is_sold(self, obj):
