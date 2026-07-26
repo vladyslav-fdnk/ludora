@@ -30,6 +30,8 @@ class OrderSchemaTests(APITestCase):
 
         for view_name in (
             "OrderPayAPIView",
+            "OrderListCreateAPIView",
+            "OrderDetailAPIView",
             "MyOrdersAPIView",
             "PaymentCreateAPIView",
         ):
@@ -39,6 +41,8 @@ class OrderSchemaTests(APITestCase):
         paths = self.response.data["paths"]
 
         self.assertIn("/api/orders/{id}/pay/", paths)
+        self.assertIn("/api/orders/{id}/", paths)
+        self.assertIn("/api/orders/", paths)
         self.assertIn("/api/orders/my/", paths)
         self.assertIn("/api/orders/payments/", paths)
 
@@ -84,10 +88,44 @@ class OrderSchemaTests(APITestCase):
                 "total_price",
                 "price_paid",
                 "created_at",
+                "updated_at",
                 "paid_at",
                 "items",
             },
         )
+
+    def test_canonical_order_history_schema_documents_security_and_errors(self):
+        paths = self.response.data["paths"]
+        list_operation = paths["/api/orders/"]["get"]
+        detail_operation = paths["/api/orders/{id}/"]["get"]
+
+        self.assertTrue(list_operation["security"])
+        self.assertTrue(detail_operation["security"])
+        self.assertIn("401", list_operation["responses"])
+        self.assertIn("401", detail_operation["responses"])
+        self.assertIn("404", detail_operation["responses"])
+        self.assertEqual(detail_operation["parameters"][0]["name"], "id")
+
+        page_schema = self._json_schema(
+            list_operation["responses"]["200"]["content"]
+        )
+        item_schema = self._json_schema(
+            {
+                "application/json": {
+                    "schema": page_schema["properties"]["results"]["items"]
+                }
+            }
+        )
+        detail_schema = self._json_schema(
+            detail_operation["responses"]["200"]["content"]
+        )
+        self.assertEqual(
+            set(item_schema["properties"]),
+            set(detail_schema["properties"]),
+        )
+        self.assertNotIn("license_key", item_schema["properties"])
+        self.assertNotIn("user", item_schema["properties"])
+        self.assertNotIn("email", item_schema["properties"])
 
     def test_payment_create_schema_matches_api_payloads(self):
         operation = self.response.data["paths"]["/api/orders/payments/"]["post"]

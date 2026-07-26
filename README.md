@@ -68,7 +68,8 @@ Backend models, APIs, and service logic already support:
   product.
 - Atomic multi-product order creation from the current cart.
 - Immutable order-item title, quantity, and unit-price snapshots.
-- Listing the authenticated user's orders.
+- Paginated order history scoped to the authenticated user, with staff-wide
+  visibility and secure individual-order retrieval.
 - Creating payment records for owned orders.
 - A simulated payment operation that assigns an available license key and marks
   the order as paid.
@@ -141,10 +142,34 @@ client login endpoint.
 
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
-| `POST` | `/api/orders/` | JWT | Create an order |
-| `GET` | `/api/orders/my/` | JWT | List the current user's orders |
+| `GET` | `/api/orders/` | JWT | List visible orders, newest first |
+| `POST` | `/api/orders/` | JWT | Create a direct order |
+| `GET` | `/api/orders/<id>/` | JWT | Retrieve one visible order |
+| `GET` | `/api/orders/my/` | JWT | Backward-compatible alias for the order list |
 | `POST` | `/api/orders/<id>/pay/` | JWT | Run the simulated payment flow |
 | `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
+
+Regular users see only orders whose `user` ownership field identifies their
+account. Staff users can list and retrieve all orders, including guest orders.
+An order outside a regular user's scope returns `404 Not Found`, just like a
+nonexistent order. Query parameters cannot select a different owner.
+
+Guest orders are not automatically claimed by matching an account email; such a
+claiming flow needs a separate security design. Order-history responses contain
+order and immutable item-snapshot data but never raw license keys, payment
+provider details, or user records. The existing successful-payment response and
+transactional confirmation email remain the explicit license-key delivery
+paths.
+
+Example authenticated reads:
+
+```bash
+curl -H "Authorization: Bearer <access-token>" \
+  http://localhost:8000/api/orders/
+
+curl -H "Authorization: Bearer <access-token>" \
+  http://localhost:8000/api/orders/123/
+```
 
 ### Cart
 

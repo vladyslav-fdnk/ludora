@@ -100,7 +100,7 @@ class OrderPaymentSerializer(serializers.ModelSerializer):
         return "Payment pending"
 
 
-class MyOrderSerializer(serializers.ModelSerializer):
+class OrderHistorySerializer(serializers.ModelSerializer):
     items = OrderItemSerializer(many=True, read_only=True)
     product = serializers.SerializerMethodField()
 
@@ -115,6 +115,7 @@ class MyOrderSerializer(serializers.ModelSerializer):
             "total_price",
             "price_paid",
             "created_at",
+            "updated_at",
             "paid_at",
             "items",
         )
