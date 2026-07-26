@@ -275,6 +275,30 @@ invariants explicit instead of inferring behavior from partially populated field
 
 The model also defines `CANCELLED`, but the current application exposes no cancellation workflow.
 
+### Order-history authorization
+
+`Order.user` is the ownership boundary for authenticated order history. The
+`GET /api/orders/` and `GET /api/orders/<id>/` views begin with the same scoped
+queryset: regular users receive only rows whose owner is `request.user`, while
+authenticated staff receive all rows, including guest orders. Detail lookup
+runs against that queryset, so another user's order and a nonexistent order
+both produce `404`; this prevents order identifiers from becoming an existence
+oracle. The list uses standard page-number pagination and deterministic
+`created_at`, then primary-key, descending order.
+
+The history serializer reads immutable `OrderItem` snapshots and deliberately
+omits the owner, customer email, payment records, and assigned license key.
+Prefetching those item snapshots bounds list and detail queries without joining
+unserialized users, payments, or key inventory. License delivery remains in the
+existing successful direct-payment response and post-commit transactional
+email, rather than being broadened into a long-lived history response.
+
+Authenticated direct creation and cart checkout already derive ownership from
+`request.user`; clients cannot submit an owner. Orders with `user=None` remain
+guest records. Matching a guest order's email to a later account does not prove
+ownership, so retrospective email-based claiming is deferred until a separate
+verification and threat model exists.
+
 ## Immutable snapshots
 
 `OrderItem` is the stable record of what the customer agreed to buy. An order cannot rely on joining back to the current product row for its commercial meaning because catalogue

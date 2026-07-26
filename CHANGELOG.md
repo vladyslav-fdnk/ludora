@@ -28,8 +28,8 @@ below summarize how the portfolio project evolved.
 - Direct and cart-based orders with generated `LUD-...` order numbers,
   authoritative totals, and item snapshots that preserve title, quantity, and
   unit price at purchase time.
-- A private “My Orders” view showing the current user's orders newest first,
-  with historical product titles preserved.
+- Paginated authenticated order list and detail endpoints with historical
+  product snapshots, regular-user ownership scoping, and staff-wide visibility.
 - Payment records and a local simulated payment flow for direct orders,
   including license-key assignment. No external payment provider is connected.
 - A persistent authenticated cart with product addition, quantity updates,
@@ -62,6 +62,8 @@ below summarize how the portfolio project evolved.
   compatible direct-order responses.
 - Order responses now include `source`, `total_price`, and normalized `items`.
   “My Orders” uses preserved item titles rather than current catalogue data.
+- The canonical order-history list is now `GET /api/orders/`; the existing
+  `/api/orders/my/` route remains a backward-compatible alias.
 - Direct order creation and its initial item snapshot now complete
   atomically.
 - Payments use the order's authoritative total, so later catalogue price
@@ -99,6 +101,9 @@ below summarize how the portfolio project evolved.
 - Enforced order and cart ownership in API queries so users cannot access or
   mutate another user's records; Telegram cart callbacks also validate their
   intended owner.
+- Scoped order list and detail queries before retrieval, returning `404` for
+  inaccessible details and omitting owners, payment internals, and raw license
+  keys from history responses.
 - Protected product write operations with staff permissions and the Telegram
   identity synchronization endpoint with a shared internal secret.
 - Prevented registration from accepting privilege flags and covered anonymous,

@@ -8,25 +8,56 @@ from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order
 from apps.orders.serializers import (
     ErrorResponseSerializer,
-    MyOrderSerializer,
+    OrderHistorySerializer,
     OrderPaymentSerializer,
     OrderSerializer,
 )
 from apps.orders.services import pay_order
 
 
-class OrderCreateAPIView(generics.CreateAPIView):
+class OrderVisibilityMixin:
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Order.objects.none()
+
+        queryset = Order.objects.prefetch_related("items").order_by(
+            "-created_at",
+            "-id",
+        )
+        if self.request.user.is_staff:
+            return queryset
+        return queryset.filter(user=self.request.user)
+
+
+class OrderListCreateAPIView(OrderVisibilityMixin, generics.ListCreateAPIView):
     queryset = Order.objects.all()
-    serializer_class = OrderSerializer
     permission_classes = [
         IsAuthenticated,
     ]
+
+    def get_serializer_class(self):
+        if self.request.method == "GET":
+            return OrderHistorySerializer
+        return OrderSerializer
 
     def perform_create(self, serializer):
         serializer.save(
             user=self.request.user,
             email=self.request.user.email,
         )
+
+    @extend_schema(
+        responses={
+            200: OrderHistorySerializer(many=True),
+            401: OpenApiResponse(description="JWT authentication is required."),
+        },
+        description=(
+            "List orders visible to the authenticated user, newest first. "
+            "Regular users see only their own orders; staff users see all orders."
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
 
 class OrderPayAPIView(APIView):
@@ -85,20 +116,30 @@ class OrderPayAPIView(APIView):
         )
 
 
-class MyOrdersAPIView(generics.ListAPIView):
-    serializer_class = MyOrderSerializer
+class OrderDetailAPIView(OrderVisibilityMixin, generics.RetrieveAPIView):
+    serializer_class = OrderHistorySerializer
     permission_classes = [
         IsAuthenticated,
     ]
 
-    def get_queryset(self):
-        if getattr(self, "swagger_fake_view", False):
-            return Order.objects.none()
+    @extend_schema(
+        responses={
+            200: OrderHistorySerializer,
+            401: OpenApiResponse(description="JWT authentication is required."),
+            404: OpenApiResponse(
+                description="The order does not exist or is not visible to this user."
+            ),
+        },
+        description=(
+            "Retrieve one visible order. Orders outside a regular user's ownership "
+            "scope are returned as not found; staff users may retrieve any order."
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+        return super().get(request, *args, **kwargs)
 
-        return (
-            Order.objects.filter(
-                user=self.request.user,
-            )
-            .prefetch_related("items")
-            .order_by("-created_at")
-        )
+
+class MyOrdersAPIView(OrderListCreateAPIView):
+    """Backward-compatible alias for the authenticated order list."""
+
+    http_method_names = ("get", "head", "options")
