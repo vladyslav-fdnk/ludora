@@ -3,10 +3,10 @@
 Ludora is a backend-focused marketplace for digital products and license keys. Its purpose is to demonstrate a small but credible commerce system: a searchable catalogue, two
 authentication paths, persistent shopping carts, immutable order history, and transaction-safe payment and fulfilment rules.
 
-The system consists of a Django REST API, PostgreSQL, and an aiogram Telegram client. Docker Compose provides a reproducible development topology. The design favors explicit domain
+The system consists of a Django REST API, PostgreSQL, a Redis-backed Celery worker, and an aiogram Telegram client. Docker Compose provides a reproducible development topology. The design favors explicit domain
 boundaries, server-owned financial calculations, database-backed invariants, and thin transport layers.
 
-This document describes the architectural decisions and guarantees of the current `feature/cart-and-orders` branch. It intentionally does not serve as an endpoint reference or a
+This document describes the architectural decisions and guarantees of the current system. It intentionally does not serve as an endpoint reference or a
 code walkthrough.
 
 ## Technology stack
@@ -38,10 +38,19 @@ benefit from foreign keys and transactional updates.
 
 ### Docker
 
-The backend, bot, and PostgreSQL database are independently packaged and orchestrated with Docker Compose. This makes the development topology explicit, keeps Python and PostgreSQL
-versions reproducible, and lets the bot address the backend by service name.
+The backend, Celery worker, bot, PostgreSQL database, and Redis broker are independently orchestrated with Docker Compose. The worker reuses the backend image and source while running
+a separate process. This makes the development topology explicit, keeps runtime versions reproducible, and lets containers address one another by service name.
 
-The backend entrypoint waits for PostgreSQL readiness before starting Django. Compose currently models startup and local development; it is not a production deployment definition.
+The backend and worker entrypoint waits for PostgreSQL readiness before starting its command, while Compose also gates the worker on Redis health. Compose currently models startup
+and local development; it is not a production deployment definition.
+
+### Celery and Redis
+
+Celery provides the initial background-processing foundation. Django owns the Celery application and discovers shared tasks from installed applications. Tasks accept JSON only and
+use the Django timezone configuration. Redis is currently a broker only; task results are deliberately not stored.
+
+The only background task is a bounded diagnostic logging probe used to verify broker-to-worker execution. No commerce, payment, email, inventory, cleanup, analytics, scheduling, or
+Telegram workflow dispatches background work yet. Backend tests run tasks eagerly and do not require Redis.
 
 ### aiogram
 
@@ -83,6 +92,9 @@ flowchart LR
     SA[Staff administrator] --> ADMIN[Django admin]
     ADMIN --> API
     API --> DB[(PostgreSQL)]
+    API -.->|JSON task| REDIS[(Redis broker)]
+    REDIS --> WORKER[Celery worker]
+    WORKER --> DB
 ```
 
 The **Django REST API** is the system of record and the only application component that reads or changes commerce data. It owns authentication, catalogue visibility, cart mutation,
@@ -104,6 +116,7 @@ The backend is organized as a Django project plus domain applications:
 backend/
 ├── config/                  # Settings, root URLs, WSGI and ASGI entry points
 └── apps/
+    ├── core/                # Cross-cutting infrastructure and diagnostic tasks
     ├── authentication/      # Registration, JWT and Telegram authentication
     ├── users/               # Custom user identity and persistence
     ├── games/               # Catalogue and license-key inventory
@@ -357,6 +370,8 @@ coverage.
 
 **Concurrency tests** use transactional test cases, separate database connections, thread barriers, and PostgreSQL row-lock support. They verify checkout races, mutation during
 checkout, and competing payment creation.
+
+**Celery tests** verify Django configuration, task discovery, eager execution, logging, and JSON-compatible task values without contacting an external broker.
 
 **Bot tests** cover configuration, authentication and token refresh, the async API client, response schemas, handlers, callback keyboards, localization, and presentation. External
 HTTP and Telegram behavior can therefore be simulated without a running bot.

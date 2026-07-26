@@ -42,6 +42,8 @@ below summarize how the portfolio project evolved.
   REST API.
 - Docker Compose services for PostgreSQL, the backend, and the Telegram
   bot.
+- A Redis broker, separate Celery worker, Django Celery application, and
+  diagnostic task with broker-free eager tests.
 - Automated backend and bot test suites covering APIs, permissions, migrations,
   schemas, transactions, concurrency, authentication, localization, and UI
   presentation.

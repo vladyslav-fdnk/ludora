@@ -17,13 +17,14 @@ Ludora contains two independently packaged Python applications:
 - **Backend:** Django and Django REST Framework expose the marketplace API.
 - **Database:** PostgreSQL stores users, catalogue data, carts, normalized order
   items, payments, and license keys.
+- **Background processing:** Celery workers consume JSON tasks from Redis.
 - **Telegram bot:** aiogram communicates with the backend through an asynchronous
   HTTPX client.
 - **Authentication:** Simple JWT supports email/password login. A separate
   internal endpoint authenticates Telegram identities using a shared secret and
   returns JWTs.
-- **Infrastructure:** Docker Compose runs the backend, PostgreSQL, and bot
-  services.
+- **Infrastructure:** Docker Compose runs the backend, PostgreSQL, Redis, a
+  Celery worker, and the bot.
 
 The Django backend is split into domain apps. Order and payment rules are kept in
 service modules, while API views handle HTTP concerns. The bot separates API,
@@ -191,9 +192,26 @@ with the Compose plugin.
 The API is then available at `http://localhost:8000/`. The bot starts long
 polling when its required environment variables are configured.
 
-### Tests
+### Celery development check
 
-The current suites contain **123 backend tests** and **82 bot tests**.
+Redis is used only as Celery's broker; task results are not stored. View worker
+output with:
+
+```bash
+docker compose logs -f celery_worker
+```
+
+To send the diagnostic task through Redis from the backend container:
+
+```bash
+docker compose exec backend uv run python manage.py shell -c \
+  "from apps.core.tasks import log_worker_probe; print(log_worker_probe.delay('manual-worker-probe').id)"
+```
+
+The worker log records `Celery diagnostic task executed` with the diagnostic
+message. This task is intentionally independent of commerce workflows.
+
+### Tests
 
 ```bash
 docker compose exec backend uv run pytest
@@ -240,6 +258,7 @@ secrets.
 | `POSTGRES_PASSWORD` | PostgreSQL password |
 | `POSTGRES_HOST` | PostgreSQL host name |
 | `POSTGRES_PORT` | PostgreSQL port |
+| `CELERY_BROKER_URL` | Celery broker URL; Compose uses the `redis` service |
 | `BOT_TOKEN` | Telegram Bot API token |
 | `BOT_BACKEND_BASE_URL` | Backend base URL used by the bot |
 | `BOT_API_TIMEOUT` | Backend request timeout in seconds |
@@ -251,13 +270,14 @@ secrets.
 ludora/
 ├── backend/
 │   ├── apps/
+│   │   ├── core/            # Cross-cutting infrastructure and diagnostic tasks
 │   │   ├── authentication/  # Email/JWT and internal Telegram authentication
 │   │   ├── carts/           # Persistent carts, cart items, checkout API/services
 │   │   ├── games/           # Products, platforms, categories, and license keys
 │   │   ├── orders/          # Orders, order items, payments, APIs, and services
 │   │   ├── payments/        # Placeholder for future provider integration
 │   │   └── users/           # Custom email-based user model
-│   ├── config/              # Django settings and root URL configuration
+│   ├── config/              # Django settings, Celery app, and root URLs
 │   ├── manage.py
 │   ├── entrypoint.sh
 │   ├── Dockerfile
