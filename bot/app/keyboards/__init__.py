@@ -1,3 +1,13 @@
-from .callbacks import CataloguePageCallback, LanguageCallback, ProductCallback
+from .callbacks import (
+    CataloguePageCallback,
+    LanguageCallback,
+    OrderDetailCallback,
+    ProductCallback,
+)
 
-__all__ = ["CataloguePageCallback", "LanguageCallback", "ProductCallback"]
+__all__ = [
+    "CataloguePageCallback",
+    "LanguageCallback",
+    "OrderDetailCallback",
+    "ProductCallback",
+]

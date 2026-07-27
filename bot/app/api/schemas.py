@@ -1,6 +1,7 @@
 """Validated domain structures for backend API responses."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -191,6 +192,134 @@ class CheckoutOrder:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class OrderSummary:
+    id: int
+    status: str
+    created_at: datetime
+    number_of_items: int
+    total_price: Decimal
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "OrderSummary":
+        if not isinstance(value, dict):
+            raise InvalidResponse("Order summary must be an object")
+        status = _required_string(value, "status")
+        number_of_items = value.get("number_of_items")
+        if (
+            isinstance(number_of_items, bool)
+            or not isinstance(number_of_items, int)
+            or number_of_items < 0
+        ):
+            raise InvalidResponse("Order item count is invalid")
+        return cls(
+            id=_positive_int(value, "id"),
+            status=status,
+            created_at=_datetime(value, "created_at"),
+            number_of_items=number_of_items,
+            total_price=_decimal(value, "total_price"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LicenseAssignment:
+    id: int
+    license_key: str | None
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "LicenseAssignment":
+        if not isinstance(value, dict):
+            raise InvalidResponse("License assignment must be an object")
+        return cls(
+            id=_positive_int(value, "id"),
+            license_key=_optional_string(value, "license_key"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderDetailItem:
+    product: int
+    product_title: str
+    quantity: int
+    unit_price: Decimal
+    line_total: Decimal
+    license_assignments: tuple[LicenseAssignment, ...]
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "OrderDetailItem":
+        if not isinstance(value, dict) or not isinstance(
+            value.get("license_assignments"), list
+        ):
+            raise InvalidResponse("Order detail item is invalid")
+        return cls(
+            product=_positive_int(value, "product"),
+            product_title=_required_string(value, "product_title"),
+            quantity=_positive_int(value, "quantity"),
+            unit_price=_decimal(value, "unit_price"),
+            line_total=_decimal(value, "line_total"),
+            license_assignments=tuple(
+                LicenseAssignment.from_mapping(item)
+                for item in value["license_assignments"]
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderPayment:
+    id: int
+    status: str
+    provider: str
+    transaction_id: str
+    amount: Decimal
+    created_at: datetime
+    paid_at: datetime | None
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "OrderPayment":
+        if not isinstance(value, dict):
+            raise InvalidResponse("Order payment must be an object")
+        return cls(
+            id=_positive_int(value, "id"),
+            status=_required_string(value, "status"),
+            provider=_string(value, "provider"),
+            transaction_id=_string(value, "transaction_id"),
+            amount=_decimal(value, "amount"),
+            created_at=_datetime(value, "created_at"),
+            paid_at=_optional_datetime(value, "paid_at"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OrderDetail:
+    id: int
+    order_number: str
+    status: str
+    total_price: Decimal
+    created_at: datetime
+    items: tuple[OrderDetailItem, ...]
+    payments: tuple[OrderPayment, ...]
+
+    @classmethod
+    def from_mapping(cls, value: Any) -> "OrderDetail":
+        if (
+            not isinstance(value, dict)
+            or not isinstance(value.get("items"), list)
+            or not isinstance(value.get("payments"), list)
+        ):
+            raise InvalidResponse("Order detail is invalid")
+        return cls(
+            id=_positive_int(value, "id"),
+            order_number=_required_string(value, "order_number"),
+            status=_required_string(value, "status"),
+            total_price=_decimal(value, "total_price"),
+            created_at=_datetime(value, "created_at"),
+            items=tuple(OrderDetailItem.from_mapping(item) for item in value["items"]),
+            payments=tuple(
+                OrderPayment.from_mapping(item) for item in value["payments"]
+            ),
+        )
+
+
 def _optional_string(value: dict[str, Any], key: str) -> str | None:
     item = value.get(key)
     if item is None:
@@ -198,6 +327,39 @@ def _optional_string(value: dict[str, Any], key: str) -> str | None:
     if not isinstance(item, str):
         raise InvalidResponse(f"Product {key} is invalid")
     return item
+
+
+def _required_string(value: dict[str, Any], key: str) -> str:
+    item = value.get(key)
+    if not isinstance(item, str) or not item:
+        raise InvalidResponse(f"{key} is invalid")
+    return item
+
+
+def _string(value: dict[str, Any], key: str) -> str:
+    item = value.get(key)
+    if not isinstance(item, str):
+        raise InvalidResponse(f"{key} is invalid")
+    return item
+
+
+def _datetime(value: dict[str, Any], key: str) -> datetime:
+    item = value.get(key)
+    if not isinstance(item, str):
+        raise InvalidResponse(f"{key} is invalid")
+    try:
+        result = datetime.fromisoformat(item.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise InvalidResponse(f"{key} is invalid") from exc
+    if result.tzinfo is None:
+        raise InvalidResponse(f"{key} is invalid")
+    return result
+
+
+def _optional_datetime(value: dict[str, Any], key: str) -> datetime | None:
+    if value.get(key) is None:
+        return None
+    return _datetime(value, key)
 
 
 def _positive_int(value: dict[str, Any], key: str) -> int:

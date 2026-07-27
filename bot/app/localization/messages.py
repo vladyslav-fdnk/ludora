@@ -7,6 +7,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.language": "🌐 Change language",
         "button.profile": "👤 Profile",
         "button.cart": "🛒 Cart",
+        "button.orders": "📦 My orders",
+        "button.order_details": "Order #{order_id} details",
         "button.add_cart": "Add to cart",
         "button.view_cart": "View cart",
         "button.continue_shopping": "Continue shopping",
@@ -59,6 +61,27 @@ MESSAGES: dict[str, dict[str, str]] = {
         "command.catalogue": "Browse the product catalogue",
         "command.profile": "Show your Ludora profile",
         "command.cart": "Show your shopping cart",
+        "command.orders": "Show your order history",
+        "orders.title": "<b>My orders</b>",
+        "orders.empty": "You do not have any orders yet.",
+        "orders.id": "<b>Order:</b> #{value}",
+        "orders.status": "<b>Status:</b> {value}",
+        "orders.created": "<b>Created:</b> {value}",
+        "orders.items": "<b>Items:</b> {value}",
+        "orders.total": "<b>Total:</b> {value}",
+        "orders.not_found": "This order no longer exists.",
+        "order_detail.title": "<b>Order #{order_id}</b>",
+        "order_detail.products": "<b>Products</b>",
+        "order_detail.item": (
+            "{title}\n{quantity} × {unit_price} — {line_total}"
+        ),
+        "order_detail.payments": "<b>Payment information</b>",
+        "order_detail.payment": (
+            "Status: {status}\nProvider: {provider}\n"
+            "Transaction: {transaction_id}\nAmount: {amount}"
+        ),
+        "order_detail.no_payments": "No payment information is available.",
+        "order_detail.license_keys": "<b>License keys</b>",
         "cart.title": "<b>Your cart</b>",
         "cart.empty": "Your cart is empty.",
         "cart.item": "<b>{title}</b>\n{quantity} × {unit_price} = {line_total}",
@@ -86,6 +109,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.language": "🌐 Изменить язык",
         "button.profile": "👤 Профиль",
         "button.cart": "🛒 Корзина",
+        "button.orders": "📦 Мои заказы",
+        "button.order_details": "Заказ №{order_id}: подробнее",
         "button.add_cart": "Добавить в корзину",
         "button.view_cart": "Открыть корзину",
         "button.continue_shopping": "Продолжить покупки",
@@ -136,6 +161,27 @@ MESSAGES: dict[str, dict[str, str]] = {
         "command.catalogue": "Просмотреть каталог товаров",
         "command.profile": "Показать профиль Ludora",
         "command.cart": "Показать корзину",
+        "command.orders": "Показать историю заказов",
+        "orders.title": "<b>Мои заказы</b>",
+        "orders.empty": "У вас пока нет заказов.",
+        "orders.id": "<b>Заказ:</b> №{value}",
+        "orders.status": "<b>Статус:</b> {value}",
+        "orders.created": "<b>Создан:</b> {value}",
+        "orders.items": "<b>Товаров:</b> {value}",
+        "orders.total": "<b>Итого:</b> {value}",
+        "orders.not_found": "Этот заказ больше не существует.",
+        "order_detail.title": "<b>Заказ №{order_id}</b>",
+        "order_detail.products": "<b>Товары</b>",
+        "order_detail.item": (
+            "{title}\n{quantity} × {unit_price} — {line_total}"
+        ),
+        "order_detail.payments": "<b>Информация об оплате</b>",
+        "order_detail.payment": (
+            "Статус: {status}\nПровайдер: {provider}\n"
+            "Транзакция: {transaction_id}\nСумма: {amount}"
+        ),
+        "order_detail.no_payments": "Информация об оплате отсутствует.",
+        "order_detail.license_keys": "<b>Лицензионные ключи</b>",
         "cart.title": "<b>Ваша корзина</b>",
         "cart.empty": "Ваша корзина пуста.",
         "cart.item": "<b>{title}</b>\n{quantity} × {unit_price} = {line_total}",

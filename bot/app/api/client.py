@@ -20,7 +20,15 @@ from .exceptions import (
     UnexpectedAPIStatus,
     ValidationFailed,
 )
-from .schemas import Cart, CartItem, CheckoutOrder, Product, ProductPage
+from .schemas import (
+    Cart,
+    CartItem,
+    CheckoutOrder,
+    OrderDetail,
+    OrderSummary,
+    Product,
+    ProductPage,
+)
 
 
 class BackendClient:
@@ -117,6 +125,21 @@ class BackendClient:
         return CheckoutOrder.from_mapping(
             await self._authenticated_json("POST", "api/cart/checkout/", telegram_id)
         )
+
+    async def get_my_orders(self, telegram_id: int) -> tuple[OrderSummary, ...]:
+        data = await self._authenticated_json("GET", "api/orders/my/", telegram_id)
+        results = data.get("results") if isinstance(data, dict) else data
+        if not isinstance(results, list):
+            raise InvalidResponse("Order history must contain a result list")
+        return tuple(OrderSummary.from_mapping(item) for item in results)
+
+    async def get_my_order(self, telegram_id: int, order_id: int) -> OrderDetail:
+        if isinstance(order_id, bool) or not isinstance(order_id, int) or order_id < 1:
+            raise ValueError("order_id must be a positive integer")
+        data = await self._authenticated_json(
+            "GET", f"api/orders/my/{order_id}/", telegram_id
+        )
+        return OrderDetail.from_mapping(data)
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -28,6 +28,12 @@ def main_menu(language: str, translator: Translator) -> InlineKeyboardMarkup:
             ],
             [
                 InlineKeyboardButton(
+                    text=translator.get("button.orders", language),
+                    callback_data="orders",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text=translator.get("button.language", language),
                     callback_data="choose_language",
                 )

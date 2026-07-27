@@ -32,3 +32,8 @@ class CartItemCallback(CallbackData, prefix="cit"):
 class CartActionCallback(CallbackData, prefix="crt"):
     action: Literal["clear", "clear_yes", "checkout", "checkout_yes"]
     owner_id: PositiveInt
+
+
+class OrderDetailCallback(CallbackData, prefix="ord"):
+    order_id: PositiveInt
+    owner_id: PositiveInt

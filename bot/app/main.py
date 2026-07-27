@@ -12,7 +12,13 @@ from app.api import BackendClient
 from app.auth import InMemoryTokenStorage
 from app.auth.service import TelegramAuthService
 from app.config import Settings
-from app.handlers import cart_router, catalogue_router, profile_router, start_router
+from app.handlers import (
+    cart_router,
+    catalogue_router,
+    orders_router,
+    profile_router,
+    start_router,
+)
 from app.localization import LanguagePreferences, Translator
 
 logging.basicConfig(level=logging.INFO)
@@ -30,6 +36,7 @@ def create_application(
     dispatcher.include_router(start_router)
     dispatcher.include_router(profile_router)
     dispatcher.include_router(cart_router)
+    dispatcher.include_router(orders_router)
     dispatcher.include_router(catalogue_router)
     token_storage = InMemoryTokenStorage()
     api_client = BackendClient(
@@ -56,6 +63,10 @@ async def register_commands(bot: Bot, translator: Translator) -> None:
             ),
             BotCommand(command="profile", description=translator.get("command.profile", language)),
             BotCommand(command="cart", description=translator.get("command.cart", language)),
+            BotCommand(
+                command="orders",
+                description=translator.get("command.orders", language),
+            ),
         ]
         try:
             await bot.set_my_commands(
