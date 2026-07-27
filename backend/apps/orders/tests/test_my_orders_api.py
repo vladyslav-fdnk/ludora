@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import LicenseKey, Platform, Product
-from apps.orders.models import Order, OrderItem
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.orders.services import create_direct_order
 
 User = get_user_model()
@@ -356,3 +356,173 @@ class OrderDetailAPIViewTests(APITestCase):
 
         self.assertEqual(other_response.status_code, status.HTTP_200_OK)
         self.assertEqual(guest_response.status_code, status.HTTP_200_OK)
+
+
+class PersonalOrderHistoryAPIViewTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="personal-history@test.com",
+            password="password123",
+        )
+        self.other_user = User.objects.create_user(
+            email="foreign-history@test.com",
+            password="password123",
+        )
+        platform = Platform.objects.create(name="Personal", slug="personal")
+        self.product = Product.objects.create(
+            title="Personal History Product",
+            slug="personal-history-product",
+            product_type=Product.ProductType.GAME,
+            platform=platform,
+            price=Decimal("12.50"),
+        )
+        self.list_url = reverse("orders:my-orders")
+
+    def create_order(self, *, user=None, quantity=1):
+        owner = user or self.user
+        order = Order.objects.create(
+            user=owner,
+            email=owner.email,
+            source=Order.Source.CART,
+            total_price=Decimal("12.50") * quantity,
+        )
+        item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=quantity,
+            unit_price=Decimal("12.50"),
+        )
+        return order, item
+
+    def test_authentication_is_required_for_list_and_detail(self):
+        order, _ = self.create_order()
+
+        list_response = self.client.get(self.list_url)
+        detail_response = self.client.get(
+            reverse("orders:my-order-detail", kwargs={"pk": order.pk})
+        )
+
+        self.assertEqual(list_response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(detail_response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_empty_history(self):
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["results"], [])
+
+    def test_multiple_orders_include_only_summary_and_quantity_total(self):
+        first, _ = self.create_order(quantity=2)
+        second, _ = self.create_order(quantity=3)
+        foreign, _ = self.create_order(user=self.other_user)
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get(self.list_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            [result["id"] for result in response.data["results"]],
+            [second.pk, first.pk],
+        )
+        self.assertEqual(response.data["results"][0]["number_of_items"], 3)
+        self.assertEqual(
+            set(response.data["results"][0]),
+            {
+                "id",
+                "status",
+                "created_at",
+                "paid_at",
+                "total_price",
+                "number_of_items",
+            },
+        )
+        self.assertNotIn(foreign.pk, [row["id"] for row in response.data["results"]])
+
+    def test_detail_contains_items_assignments_keys_and_payment_for_paid_order(self):
+        order, item = self.create_order()
+        paid_at = timezone.now()
+        order.status = Order.Status.PAID
+        order.price_paid = order.total_price
+        order.paid_at = paid_at
+        order.save(update_fields=("status", "price_paid", "paid_at", "updated_at"))
+        key = LicenseKey.objects.create(
+            product=self.product,
+            value="PERSONAL-PAID-KEY",
+            status=LicenseKey.Status.SOLD,
+            sold_at=paid_at,
+        )
+        assignment = LicenseAssignment.objects.create(
+            order_item=item,
+            license_key=key,
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PAID,
+            provider="test",
+            transaction_id="personal-history-transaction",
+            amount=order.total_price,
+            paid_at=paid_at,
+        )
+        self.client.force_authenticate(self.user)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                reverse("orders:my-order-detail", kwargs={"pk": order.pk})
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(len(queries), 5)
+        self.assertEqual(response.data["items"][0]["quantity"], 1)
+        self.assertEqual(response.data["items"][0]["unit_price"], "12.50")
+        self.assertEqual(
+            response.data["items"][0]["license_assignments"],
+            [{"id": assignment.pk, "license_key": key.value}],
+        )
+        self.assertEqual(response.data["payments"][0]["id"], payment.pk)
+        self.assertEqual(
+            response.data["payments"][0]["transaction_id"],
+            payment.transaction_id,
+        )
+
+    def test_unpaid_order_does_not_expose_a_key(self):
+        order, item = self.create_order()
+        key = LicenseKey.objects.create(
+            product=self.product,
+            value="UNPAID-KEY-MUST-NOT-LEAK",
+            status=LicenseKey.Status.RESERVED,
+        )
+        LicenseAssignment.objects.create(order_item=item, license_key=key)
+        Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            provider="test",
+            transaction_id="pending-history-transaction",
+            amount=order.total_price,
+        )
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get(
+            reverse("orders:my-order-detail", kwargs={"pk": order.pk})
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotIn(key.value, str(response.data))
+        self.assertIsNone(
+            response.data["items"][0]["license_assignments"][0]["license_key"]
+        )
+        self.assertEqual(response.data["payments"][0]["status"], Payment.Status.PENDING)
+
+    def test_foreign_order_is_not_found_even_for_staff(self):
+        foreign, _ = self.create_order(user=self.other_user)
+        self.user.is_staff = True
+        self.user.save(update_fields=("is_staff",))
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get(
+            reverse("orders:my-order-detail", kwargs={"pk": foreign.pk})
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

@@ -6,8 +6,11 @@ from rest_framework.views import APIView
 
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order
+from apps.orders.selectors import user_order_details, user_order_history
 from apps.orders.serializers import (
     ErrorResponseSerializer,
+    MyOrderDetailSerializer,
+    MyOrderListSerializer,
     OrderHistorySerializer,
     OrderPaymentSerializer,
     OrderSerializer,
@@ -139,7 +142,23 @@ class OrderDetailAPIView(OrderVisibilityMixin, generics.RetrieveAPIView):
         return super().get(request, *args, **kwargs)
 
 
-class MyOrdersAPIView(OrderListCreateAPIView):
-    """Backward-compatible alias for the authenticated order list."""
-
+class MyOrdersAPIView(generics.ListAPIView):
+    serializer_class = MyOrderListSerializer
+    permission_classes = [IsAuthenticated]
     http_method_names = ("get", "head", "options")
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Order.objects.none()
+        return user_order_history(user=self.request.user)
+
+
+class MyOrderDetailAPIView(generics.RetrieveAPIView):
+    serializer_class = MyOrderDetailSerializer
+    permission_classes = [IsAuthenticated]
+    http_method_names = ("get", "head", "options")
+
+    def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Order.objects.none()
+        return user_order_details(user=self.request.user)

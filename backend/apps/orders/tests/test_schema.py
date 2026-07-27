@@ -33,6 +33,7 @@ class OrderSchemaTests(APITestCase):
             "OrderListCreateAPIView",
             "OrderDetailAPIView",
             "MyOrdersAPIView",
+            "MyOrderDetailAPIView",
             "PaymentCreateAPIView",
         ):
             self.assertNotIn(view_name, self.schema_stderr)
@@ -44,6 +45,7 @@ class OrderSchemaTests(APITestCase):
         self.assertIn("/api/orders/{id}/", paths)
         self.assertIn("/api/orders/", paths)
         self.assertIn("/api/orders/my/", paths)
+        self.assertIn("/api/orders/my/{id}/", paths)
         self.assertIn("/api/orders/payments/", paths)
 
     def test_order_pay_schema_matches_api_payloads(self):
@@ -70,7 +72,7 @@ class OrderSchemaTests(APITestCase):
             )
             self.assertEqual(set(error_schema["properties"]), {"error"})
 
-    def test_my_orders_schema_exposes_normalized_items_and_totals(self):
+    def test_my_orders_schema_exposes_summary_fields(self):
         operation = self.response.data["paths"]["/api/orders/my/"]["get"]
         page_schema = self._json_schema(operation["responses"]["200"]["content"])
         item_schema = self._json_schema(
@@ -81,18 +83,36 @@ class OrderSchemaTests(APITestCase):
             set(item_schema["properties"]),
             {
                 "id",
+                "status",
+                "total_price",
+                "created_at",
+                "paid_at",
+                "number_of_items",
+            },
+        )
+
+    def test_my_order_detail_schema_exposes_items_payments_and_assignments(self):
+        operation = self.response.data["paths"]["/api/orders/my/{id}/"]["get"]
+        detail_schema = self._json_schema(operation["responses"]["200"]["content"])
+
+        self.assertEqual(
+            set(detail_schema["properties"]),
+            {
+                "id",
                 "order_number",
-                "product",
                 "status",
                 "source",
+                "email",
                 "total_price",
                 "price_paid",
                 "created_at",
                 "updated_at",
                 "paid_at",
                 "items",
+                "payments",
             },
         )
+        self.assertTrue(operation["security"])
 
     def test_canonical_order_history_schema_documents_security_and_errors(self):
         paths = self.response.data["paths"]

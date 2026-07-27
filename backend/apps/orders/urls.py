@@ -2,6 +2,7 @@ from django.urls import path
 
 from apps.orders.payment_views import PaymentCreateAPIView
 from apps.orders.views import (
+    MyOrderDetailAPIView,
     MyOrdersAPIView,
     OrderDetailAPIView,
     OrderListCreateAPIView,
@@ -20,6 +21,11 @@ urlpatterns = [
         "my/",
         MyOrdersAPIView.as_view(),
         name="my-orders",
+    ),
+    path(
+        "my/<int:pk>/",
+        MyOrderDetailAPIView.as_view(),
+        name="my-order-detail",
     ),
     path(
         "<int:pk>/",

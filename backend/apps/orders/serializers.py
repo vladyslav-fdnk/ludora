@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from apps.games.models import Product
-from apps.orders.models import Order, OrderItem, Payment
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.orders.services import create_direct_order
 
 
@@ -123,6 +123,78 @@ class OrderHistorySerializer(serializers.ModelSerializer):
     def get_product(self, obj) -> str | None:
         first_item = next(iter(obj.items.all()), None)
         return first_item.product_title if first_item else None
+
+
+class MyOrderListSerializer(serializers.ModelSerializer):
+    number_of_items = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "status",
+            "created_at",
+            "paid_at",
+            "total_price",
+            "number_of_items",
+        )
+
+
+class LicenseAssignmentSerializer(serializers.ModelSerializer):
+    license_key = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LicenseAssignment
+        fields = ("id", "license_key")
+
+    def get_license_key(self, obj) -> str | None:
+        order = obj.order_item.order
+        if order.status != Order.Status.PAID:
+            return None
+        return obj.license_key.value
+
+
+class MyOrderItemSerializer(OrderItemSerializer):
+    license_assignments = LicenseAssignmentSerializer(many=True, read_only=True)
+
+    class Meta(OrderItemSerializer.Meta):
+        fields = OrderItemSerializer.Meta.fields + ("license_assignments",)
+
+
+class MyOrderPaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = (
+            "id",
+            "status",
+            "provider",
+            "transaction_id",
+            "amount",
+            "created_at",
+            "paid_at",
+        )
+
+
+class MyOrderDetailSerializer(serializers.ModelSerializer):
+    items = MyOrderItemSerializer(many=True, read_only=True)
+    payments = MyOrderPaymentSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Order
+        fields = (
+            "id",
+            "order_number",
+            "status",
+            "source",
+            "email",
+            "total_price",
+            "price_paid",
+            "created_at",
+            "updated_at",
+            "paid_at",
+            "items",
+            "payments",
+        )
 
 
 class PaymentSerializer(serializers.ModelSerializer):
