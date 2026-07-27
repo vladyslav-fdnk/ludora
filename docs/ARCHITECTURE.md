@@ -45,12 +45,6 @@ which rejects anonymous and authenticated non-staff callers before serializer
 or business validation runs. Swagger exposes the JWT bearer scheme and marks
 protected operations so the same boundary is visible in the API contract.
 
-This authentication milestone does not add or redesign order ownership. The
-repository's existing order-user relationship and owned-order queries are
-preserved unchanged; extending identity into new order workflows is outside
-this milestone so authentication changes cannot silently alter commerce
-semantics.
-
 ### Django REST Framework
 
 Django REST Framework (DRF) is the HTTP boundary around the domain. It provides authentication and permission policies, request validation, serialization, pagination, filtering, and
@@ -77,11 +71,11 @@ and local development; it is not a production deployment definition.
 
 ### Celery and Redis
 
-Celery provides the initial background-processing foundation. Django owns the Celery application and discovers shared tasks from installed applications. Tasks accept JSON only and
-use the Django timezone configuration. Redis is currently a broker only; task results are deliberately not stored.
-
-The only background task is a bounded diagnostic logging probe used to verify broker-to-worker execution. No commerce, payment, email, inventory, cleanup, analytics, scheduling, or
-Telegram workflow dispatches background work yet. Backend tests run tasks eagerly and do not require Redis.
+Celery runs asynchronous work through a Redis broker. Django owns the Celery
+application, discovers shared tasks from installed applications, accepts JSON
+task payloads only, and does not store task results. The implemented tasks are
+a bounded diagnostic worker probe and the order-confirmation email task.
+Backend tests execute tasks eagerly and do not require Redis.
 
 ### aiogram
 
@@ -126,10 +120,13 @@ flowchart LR
     API -.->|JSON task| REDIS[(Redis broker)]
     REDIS --> WORKER[Celery worker]
     WORKER --> DB
+    WORKER -->|SMTP via Django email backend| EMAIL[Email service]
 ```
 
-The **Django REST API** is the system of record and the only application component that reads or changes commerce data. It owns authentication, catalogue visibility, cart mutation,
-order creation, simulated payment, and license-key assignment.
+The **Django backend** is the system of record. API requests own authentication,
+catalogue visibility, cart mutation, order creation, simulated payment, and
+license-key assignment; the Celery worker only reloads committed order state for
+asynchronous email delivery.
 
 **PostgreSQL** stores users, catalogue data, cart state, order snapshots, payments, and license-key inventory. It also arbitrates concurrent writes through constraints and row-level
 locks.
@@ -226,13 +223,21 @@ erDiagram
     ORDER ||--o{ ORDER_ITEM : snapshots
     PRODUCT ||--o{ ORDER_ITEM : referenced_by
     ORDER ||--o{ PAYMENT : has
-    ORDER o|--o| LICENSE_KEY : fulfils_with
+    ORDER_ITEM ||--o{ LICENSE_ASSIGNMENT : fulfilled_by
+    LICENSE_KEY ||--o| LICENSE_ASSIGNMENT : allocated_as
+    ORDER o|--o| LICENSE_KEY : legacy_direct_key
 ```
 
 `Product` is the catalogue aggregate, attached to one `Platform` and zero or more `Category` records. It also owns the inventory of `LicenseKey` records.
 
 A `User` may own one persistent `Cart`. Each `CartItem` identifies one product and a quantity. An `Order` belongs to a user when that account still exists, and its `OrderItem`
-children preserve what was purchased. Payments are attempts or completed financial records associated with an order. A direct paid order may be fulfilled by one license key.
+children preserve what was purchased. Payments are attempts or completed
+financial records associated with an order. Each `LicenseAssignment` links one
+sold `LicenseKey` to an `OrderItem`; an item has one assignment per purchased
+unit, while the one-to-one key relationship prevents the same key from being
+allocated twice. Paid direct and cart orders use these normalized assignments.
+The legacy direct-order `license_key` field is also populated for backward
+compatibility.
 
 Some foreign keys deliberately use `PROTECT`: catalogue records referenced by orders or fulfilment cannot be removed casually. A user's deletion uses `SET_NULL` on orders so
 commercial history can survive independently of the account.
@@ -274,20 +279,26 @@ flowchart LR
     C --> CO[Checkout]
     CO --> CRO[Cart order]
     D --> CP[Create payment]
+    CRO --> CP
     CP --> SP[Local provider confirmation]
-    SP --> K[Assign available license key]
-    K --> PAID[Paid direct order]
-    CRO --> U[Unpaid order]
+    SP --> K[Assign keys per item quantity]
+    K --> PAID[Paid order]
 ```
 
-A **DIRECT order** represents the original single-product purchase path. It stores the legacy product reference for fulfilment and also creates one normalized `OrderItem` snapshot.
-The implemented payment and license-key flow supports this order source.
+A **DIRECT order** represents the original single-product purchase path. It
+stores the legacy product reference and also creates one normalized `OrderItem`
+snapshot. Payment fulfilment creates a normalized license assignment and also
+populates the legacy order-level key field.
 
-A **CART order** represents a multi-line checkout. Its products are represented only by `OrderItem` records; the legacy product field must be null. Checkout creates the order in
-`CREATED` state and performs no payment or key assignment. Cart orders are explicitly rejected by the current direct-payment service.
+A **CART order** represents a multi-line checkout. Its products are represented
+only by `OrderItem` records; the legacy product field must be null. Checkout
+creates the order in `CREATED` state and performs no payment or key assignment.
+The payment service can subsequently allocate one available key for every unit
+of every item and records those relationships as `LicenseAssignment` rows.
 
-Both sources exist to preserve a working direct-order capability while the model evolves toward normalized multi-item orders. The source discriminator makes their differing
-invariants explicit instead of inferring behavior from partially populated fields.
+Both sources exist to preserve the legacy direct-order API while the model
+evolves around normalized multi-item orders. The source discriminator makes
+their differing structural invariants explicit.
 
 The model also defines `CANCELLED`, but the current application exposes no cancellation workflow.
 
@@ -302,12 +313,15 @@ both produce `404`; this prevents order identifiers from becoming an existence
 oracle. The list uses standard page-number pagination and deterministic
 `created_at`, then primary-key, descending order.
 
-The history serializer reads immutable `OrderItem` snapshots and deliberately
+The canonical history serializer reads immutable `OrderItem` snapshots and deliberately
 omits the owner, customer email, payment records, and assigned license key.
 Prefetching those item snapshots bounds list and detail queries without joining
 unserialized users, payments, or key inventory. License delivery remains in the
 existing successful direct-payment response and post-commit transactional
-email, rather than being broadened into a long-lived history response.
+email, rather than being broadened into a long-lived history response. Separate
+owner-scoped `/api/orders/my/` endpoints provide personal summaries and details;
+the detail representation includes payments and reveals normalized license
+assignments only for paid orders.
 
 Authenticated direct creation and cart checkout already derive ownership from
 `request.user`; clients cannot submit an owner. Orders with `user=None` remain
@@ -371,8 +385,10 @@ backward-compatible direct-pay command. A payment with a provider transaction is
 always confirmed through its stored provider; injected providers must have the
 same name. Missing, unsupported, or mismatched provider ownership is rejected
 with a stable domain error. Only the order service interprets the normalized
-result. On success it locks an available license key, marks the key
-sold, marks the payment and order paid, and records the shared paid timestamp.
+result. On success it locks the required available license keys for every
+order-item quantity, marks them sold, creates normalized assignments, marks the
+payment and order paid, and records the shared paid timestamp. Direct orders
+also retain their first assigned key in the legacy order-level field.
 On rejection the payment becomes `FAILED` while the order and inventory remain
 unchanged, allowing the established retry behavior.
 
@@ -384,14 +400,17 @@ provider call is currently inside this transaction because it is in-process and
 non-blocking. A future network provider must use a phased flow so database locks
 are not held across slow network I/O.
 
-After `pay_order` has completed all database writes, it registers a
-`transaction.on_commit` callback with the immutable order primary key. Only a
-successful outermost commit publishes the Celery order-confirmation task. The
-worker reloads the committed order, payment, item snapshots, and assigned key,
-checks that the order is still eligible, then sends a plain-text message through
-Django's email facilities. SMTP availability and task execution are outside the
-payment transaction, so an email or broker failure cannot roll back or corrupt a
-completed payment.
+After `pay_order` completes its database writes, it registers a
+`transaction.on_commit` callback with only the immutable order primary key.
+Only a successful outermost commit publishes the Celery confirmation task. The
+worker reloads committed order state, verifies that the order and a payment are
+paid and that the legacy direct-order key and paid amount exist, builds a
+plain-text confirmation, and sends it through Django's configured email
+backend. The task retries `OSError` and SMTP failures with backoff, jitter, and
+at most three retries. Missing or ineligible orders are logged and skipped.
+Because eligibility and message construction still use the legacy order-level
+key, paid cart orders are fulfilled but do not receive this email. Broker and
+email failures occur after commit and cannot roll back a completed payment.
 
 The locked transition from an unpaid order to `PAID` prevents repeated payment
 requests from scheduling another confirmation. This is dispatch idempotency,
@@ -438,7 +457,7 @@ Uniqueness constraints establish:
 - unique payment transaction identifiers when present;
 - unique Telegram identities;
 - case-insensitively unique email addresses;
-- at most one order assigned to a license key.
+- at most one normalized assignment per license key.
 
 The order source constraint ensures cart orders do not use the legacy single-product field. Foreign-key deletion policies preserve order and licence history where losing the
 referenced record would be unsafe.
@@ -468,8 +487,18 @@ authentication still fails, the stored tokens are removed; the authentication se
 Catalogue browsing is public and paginated. Handlers obtain products from the API and render localized messages and inline keyboards. The bot supports English and Russian
 presentation.
 
-Cart controls call authenticated backend operations to add, update, remove, or clear items. Callback payloads include an owner identifier so another Telegram user cannot operate
-controls from a shared message. Checkout requires confirmation and displays the returned order snapshot; it does not pay the order or deliver license keys.
+Cart controls call authenticated backend operations to add, update, remove, or
+clear items. Callback payloads include an owner identifier so another Telegram
+user cannot operate controls from a shared message. Checkout requires
+confirmation, creates an order, then attempts to create a payment. The bot
+expects a hosted `payment_url`, but the backend payment representation has no
+such field and the local provider exposes no hosted page, so this payment
+handoff is not currently end to end.
+
+The bot also exposes personal order summaries and details. Paid detail responses
+can render payment metadata and normalized license keys. This makes order
+history and key presentation implemented, but immediate post-checkout delivery
+remains dependent on completing the payment lifecycle.
 
 The bot deliberately contains no ORM models or business calculations. Its API schemas validate backend responses, and its exception mapping converts transport, authentication,
 validation, conflict, and malformed-response conditions into user-facing behavior.
@@ -490,7 +519,9 @@ coverage.
 **Concurrency tests** use transactional test cases, separate database connections, thread barriers, and PostgreSQL row-lock support. They verify checkout races, mutation during
 checkout, and competing payment creation.
 
-**Celery tests** verify Django configuration, task discovery, eager execution, logging, and JSON-compatible task values without contacting an external broker.
+**Celery tests** verify configuration, task discovery, eager execution, the
+diagnostic probe, confirmation-email eligibility and content, retry behavior,
+and post-commit dispatch without contacting an external broker.
 
 **Bot tests** cover configuration, authentication and token refresh, the async API client, response schemas, handlers, callback keyboards, localization, and presentation. External
 HTTP and Telegram behavior can therefore be simulated without a running bot.
@@ -540,7 +571,12 @@ domain rules demonstrable and testable, but it is not a substitute for productio
 The following limitations are visible in the current repository:
 
 - no external payment provider or provider SDK;
-- cart orders cannot yet be paid or assigned license keys;
+- the Telegram checkout payment contract is incomplete: the bot requires a
+  `payment_url` that the backend does not return;
+- the local provider has no hosted checkout, webhook, or independently
+  advancing payment-status flow;
+- paid cart orders can be fulfilled, but their confirmation email task is
+  skipped because it still requires the legacy direct-order key field;
 - no refunds, cancellations, or returns workflow;
 - no payment webhooks or reconciliation;
 - no payment reconciliation worker;
@@ -548,7 +584,8 @@ The following limitations are visible in the current repository:
 - bot tokens and language preferences are lost on restart and cannot be shared
   safely across bot replicas;
 - no inventory reservation timeout or checkout reservation lifecycle;
-- no bot-based license delivery;
+- paid keys can be displayed in owner-scoped bot order details, but immediate
+  checkout-to-payment-to-delivery is not operational end to end;
 - no production deployment configuration or automated deployment pipeline;
 - the GitHub Actions workflow validates the backend and bot independently;
 - no application monitoring, tracing, or structured observability stack;
@@ -558,20 +595,24 @@ These are boundaries of the current implementation, not hidden features implied 
 
 ## Future evolution
 
-A realistic next step is to implement a real gateway behind the provider
-contract. Payment creation would initiate its transaction without holding
-database locks across network I/O, while authenticated, idempotent webhooks
-would advance local state and reconcile ambiguous results. Cart orders would
-need multi-item fulfilment rather than the current single-key direct path.
+A realistic next step is to finish the backend-to-bot payment contract, then
+implement a real gateway behind the provider contract. Payment creation would
+initiate its transaction without holding database locks across network I/O,
+while authenticated, idempotent webhooks would advance local state and
+reconcile ambiguous results. Multi-item cart fulfilment already exists; gateway
+confirmation should drive that service safely.
 
-Celery could move email delivery, provider reconciliation, and other retryable work outside request latency. Redis could serve as the broker and provide shared short-lived bot
-state, but durable commerce state would remain in PostgreSQL.
+Celery already keeps confirmation-email delivery outside request latency.
+Additional tasks could handle provider reconciliation and other retryable work;
+Redis would remain the broker and could also provide shared short-lived bot
+state, while durable commerce state remains in PostgreSQL.
 
 Inventory could evolve from immediate key selection to explicit reservations with expiry. Reservation creation, checkout, payment confirmation, and timeout release would require a
 documented state machine and periodic cleanup.
 
-Customer email notifications and secure Telegram license delivery could consume paid-order events. Delivery should be idempotent and auditable so retries do not send conflicting
-fulfilment messages.
+The direct-order email path and owner-scoped Telegram key presentation can be
+extended into consistent multi-item paid-order delivery. Delivery should be
+idempotent and auditable so retries do not send conflicting fulfilment messages.
 
 The admin could gain inventory summaries, payment diagnostics, and guarded order-support actions. Refund and cancellation workflows would require explicit state transitions and
 compensating inventory rules rather than direct field editing.

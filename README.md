@@ -1,95 +1,118 @@
 # Ludora
 
-Ludora is a backend-focused digital marketplace built around a Django REST API and
-an aiogram Telegram client. It demonstrates catalogue management, two JWT
-authentication paths, Telegram account synchronization, persistent carts, and
-tested commerce domain logic in a Docker-based development environment.
+![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)
+![Django](https://img.shields.io/badge/Django-5.2-092E20?style=flat-square&logo=django&logoColor=white)
+![Django REST Framework](https://img.shields.io/badge/DRF-3.17-A30000?style=flat-square&logo=django&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-8-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Celery](https://img.shields.io/badge/Celery-5.5-37814A?style=flat-square&logo=celery&logoColor=white)
 
-The current release is **v0.2.0**. Stage 2 completed Telegram authentication,
-including user synchronization, profiles, token refresh, and a one-time retry of
-protected requests. Stage 3 adds authenticated cart management and order creation
-from a cart; the published release marker remains v0.2.0.
+Backend-first digital marketplace built with Django REST Framework and aiogram, featuring JWT authentication, persistent carts, payment simulation, license fulfillment, and Telegram integration.
 
-## Architecture
 
-Ludora contains two independently packaged Python applications:
+Ludora is a backend-focused marketplace for digital products and license keys.
+It combines a Django REST API, an aiogram Telegram bot, Django Admin, PostgreSQL,
+Redis, and Celery in a Docker Compose development environment.
 
-- **Backend:** Django and Django REST Framework expose the marketplace API.
-- **Database:** PostgreSQL stores users, catalogue data, carts, normalized order
-  items, payments, and license keys.
-- **Background processing:** Celery workers consume JSON tasks from Redis.
-- **Telegram bot:** aiogram communicates with the backend through an asynchronous
-  HTTPX client.
-- **Authentication:** Simple JWT supports email/password login. A separate
-  internal endpoint authenticates Telegram identities using a shared secret and
-  returns JWTs.
-- **Infrastructure:** Docker Compose runs the backend, PostgreSQL, Redis, a
-  Celery worker, and the bot.
+## Capabilities
 
-The Django backend is split into domain apps. Order and payment rules are kept in
-service modules, while API views handle HTTP concerns. The bot separates API,
-authentication, handlers, localization, keyboards, and presentation code.
+- Searchable, filterable, and paginated product catalogue.
+- Email/password and Telegram authentication with JWT access and refresh tokens.
+- Persistent carts with server-calculated prices and atomic checkout.
+- Direct and multi-item orders with immutable purchase snapshots.
+- Owner-scoped order history and paid license-key access.
+- Transaction-safe license fulfilment using a deterministic local payment
+  simulation.
+- Telegram browsing, profiles, cart management, checkout, and order history in
+  English and Russian.
+- Staff catalogue and inventory management through Django Admin, including
+  atomic CSV license-key imports.
+- Background tasks through Celery and Redis.
 
-The `payments` Django app owns a small provider interface, provider selection,
-and the deterministic local provider. The `Payment` model and payment
-orchestration remain in `orders`, alongside order and fulfilment rules.
+The local payment provider is for development only; no production payment
+gateway is integrated. Telegram checkout can create a payment, but its payment
+completion UI is not yet an end-to-end flow.
 
-## Implemented Functionality
+## Quick Start
 
-### Catalogue and product management
+### Requirements
 
-- Public product catalogue with page-based pagination (10 products per page).
-- Filtering by platform, product type, and category.
-- Search across product title and description.
-- Ordering by price, title, or creation date.
-- Public product details.
-- Staff-only product creation, update, and soft deletion.
-- Platforms, categories, product types, and license-key inventory.
+- Docker
+- Docker Compose plugin
 
-### Users and authentication
+### Run with Docker Compose
 
-- Custom email-based Django user model.
-- Registration and email/password JWT login.
-- Authenticated current-user profile.
-- JWT access-token refresh.
-- Internal-secret-protected Telegram authentication endpoint.
-- Atomic Telegram user creation/synchronization with a unique Telegram ID.
-- Bot-side in-memory token storage.
-- Automatic access-token refresh and one retry after a protected request returns
-  `401 Unauthorized`.
+1. Create the local environment file:
 
-### Carts, orders, and license keys
+   ```bash
+   cp .env.example .env
+   ```
 
-Backend models, APIs, and service logic already support:
+2. Set non-empty values for `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`,
+   `BOT_TOKEN`, and `BOT_INTERNAL_SECRET`.
 
-- Creating an authenticated user's order for one product.
-- One persistent cart per authenticated user.
-- Adding, changing, removing, and clearing cart items.
-- Server-calculated Decimal cart totals with a maximum quantity of 99 per
-  product.
-- Atomic multi-product order creation from the current cart.
-- Immutable order-item title, quantity, and unit-price snapshots.
-- Paginated order history scoped to the authenticated user, with staff-wide
-  visibility and secure individual-order retrieval.
-- Creating payment records for owned orders.
-- A provider-backed local payment simulation that assigns an available license
-  key and marks the order as paid.
-- An asynchronous plain-text order confirmation containing purchased products
-  and the assigned license key after successful direct-order payment.
+3. Build the images and start PostgreSQL:
 
-Cart checkout creates an order but intentionally creates no payment and assigns
-no license key. The deterministic local payment provider remains available only
-for direct single-product orders. It requires no network or credentials and is
-not a real payment gateway. External payments, payment of cart orders, and
-license-key delivery through the bot are not implemented.
+   ```bash
+   docker compose build
+   docker compose up -d postgres
+   ```
 
-## API
+4. Apply database migrations:
 
-The backend returns JSON. Once it is running:
+   ```bash
+   docker compose run --rm backend uv run python manage.py migrate
+   ```
+
+5. Start the application:
+
+   ```bash
+   docker compose up
+   ```
+
+6. Optionally create a Django Admin user in another terminal:
+
+   ```bash
+   docker compose exec backend uv run python manage.py createsuperuser
+   ```
+
+The API is available at `http://localhost:8000/`. The Telegram bot starts long
+polling when its required environment variables are configured.
+
+## Explore the Project
 
 - Swagger UI: `http://localhost:8000/api/docs/`
 - OpenAPI schema: `http://localhost:8000/api/schema/`
-- Django admin: `http://localhost:8000/admin/`
+- Django Admin: `http://localhost:8000/admin/`
+- [Architecture](docs/ARCHITECTURE.md) — component boundaries, domain model,
+  payment and fulfilment rules, and design decisions.
+- [Changelog](CHANGELOG.md) — implemented changes and development milestones.
+
+## API Overview
+
+The OpenAPI schema is the complete request and response reference. The main
+endpoint groups are summarized below.
+
+### Authentication
+
+| Method | Endpoint | Access | Purpose |
+| --- | --- | --- | --- |
+| `POST` | `/api/auth/register/` | Public | Register with email and password |
+| `POST` | `/api/auth/token/` | Public | Obtain JWT access and refresh tokens |
+| `POST` | `/api/auth/token/refresh/` | Refresh token | Obtain a new access token |
+| `GET` | `/api/auth/me/` | JWT | Retrieve the current user |
+| `POST` | `/api/auth/telegram/` | Internal secret | Synchronize a Telegram user and issue JWTs |
+
+Send access tokens to protected endpoints as:
+
+```text
+Authorization: Bearer <access-token>
+```
+
+The Telegram endpoint uses `X-Bot-Internal-Secret` and is intended only for the
+bot. Legacy `/api/auth/login/` and `/api/auth/refresh/` aliases remain available
+for the Telegram client.
 
 ### Products
 
@@ -101,187 +124,51 @@ The backend returns JSON. Once it is running:
 | `PUT`, `PATCH` | `/api/products/<id>/update/` | Staff | Update a product |
 | `DELETE` | `/api/products/<id>/delete/` | Staff | Soft-delete a product |
 
-Product-list query parameters include `platform`, `product_type`, `categories`,
-`search`, `ordering`, and `page`.
-
-### Authentication
-
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/register/` | Public | Register with email, password, and password confirmation |
-| `POST` | `/api/auth/token/` | Public | Obtain an access/refresh token pair |
-| `POST` | `/api/auth/token/refresh/` | Refresh token | Obtain a new access token |
-| `GET` | `/api/auth/me/` | JWT | Return the current user |
-| `POST` | `/api/auth/telegram/` | Internal secret | Synchronize a Telegram user and issue JWTs |
-
-Registration accepts `email`, `password`, and `password_confirmation`. It
-validates the email, enforces case-insensitive uniqueness, runs Django's
-configured password validators, and always creates a non-staff account. It does
-not issue tokens; obtain them from `/api/auth/token/` after registration.
-
-Send an access token to protected endpoints with the HTTP header:
-
-```text
-Authorization: Bearer <access-token>
-```
-
-The product list and detail endpoints are public. Product create, replace,
-partial-update, and delete endpoints require an authenticated user with
-`is_staff=True`. Create a local staff administrator with:
-
-```bash
-docker compose exec backend uv run python manage.py createsuperuser
-```
-
-The legacy `/api/auth/login/` and `/api/auth/refresh/` aliases remain available
-for the existing Telegram client.
-
-The Telegram endpoint expects the shared secret in the
-`X-Bot-Internal-Secret` header. It is intended for the bot, not as a public
-client login endpoint.
-
-### Orders
-
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/orders/` | JWT | List visible orders, newest first |
-| `POST` | `/api/orders/` | JWT | Create a direct order |
-| `GET` | `/api/orders/<id>/` | JWT | Retrieve one visible order |
-| `GET` | `/api/orders/my/` | JWT | Backward-compatible alias for the order list |
-| `POST` | `/api/orders/<id>/pay/` | JWT | Run the simulated payment flow |
-| `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
-
-These endpoint paths, request bodies, responses, and status codes are unchanged.
-New payment transactions select the internal `PAYMENT_PROVIDER` setting, whose
-safe default is `local`; clients cannot choose a provider. Existing transactions
-are always confirmed through their stored provider name, and an explicitly
-injected provider with a different name is rejected. The local provider
-creates deterministic synthetic references and confirms without contacting a
-network. Successful confirmation still assigns one available key transactionally
-and queues the order email only after commit. A future provider can implement
-the same interface, but no production gateway is integrated.
-
-Regular users see only orders whose `user` ownership field identifies their
-account. Staff users can list and retrieve all orders, including guest orders.
-An order outside a regular user's scope returns `404 Not Found`, just like a
-nonexistent order. Query parameters cannot select a different owner.
-
-Guest orders are not automatically claimed by matching an account email; such a
-claiming flow needs a separate security design. Order-history responses contain
-order and immutable item-snapshot data but never raw license keys, payment
-provider details, or user records. The existing successful-payment response and
-transactional confirmation email remain the explicit license-key delivery
-paths.
-
-Example authenticated reads:
-
-```bash
-curl -H "Authorization: Bearer <access-token>" \
-  http://localhost:8000/api/orders/
-
-curl -H "Authorization: Bearer <access-token>" \
-  http://localhost:8000/api/orders/123/
-```
+Product lists support platform, product type, and category filters; text search;
+ordering; and pagination.
 
 ### Cart
 
 | Method | Endpoint | Access | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/api/cart/` | JWT | Get or automatically create the current user's cart |
+| `GET` | `/api/cart/` | JWT | Retrieve or create the current user's cart |
 | `POST` | `/api/cart/items/` | JWT | Add a product or increase its quantity |
-| `PATCH` | `/api/cart/items/<id>/` | JWT | Set an owned cart item's quantity |
-| `DELETE` | `/api/cart/items/<id>/` | JWT | Remove an owned cart item |
-| `DELETE` | `/api/cart/clear/` | JWT | Clear the current user's cart |
-| `POST` | `/api/cart/checkout/` | JWT | Atomically create an order and clear the cart |
+| `PATCH` | `/api/cart/items/<id>/` | JWT | Change an item's quantity |
+| `DELETE` | `/api/cart/items/<id>/` | JWT | Remove an item |
+| `DELETE` | `/api/cart/clear/` | JWT | Clear the cart |
+| `POST` | `/api/cart/checkout/` | JWT | Create an order and clear the cart |
 
-Cart item requests accept product identifiers and positive quantities only.
-Prices, line totals, and cart totals are always calculated by the backend.
+### Orders and payments
+
+| Method | Endpoint | Access | Purpose |
+| --- | --- | --- | --- |
+| `GET`, `POST` | `/api/orders/` | JWT | List visible orders or create a direct order |
+| `GET` | `/api/orders/<id>/` | JWT | Retrieve a visible order |
+| `GET` | `/api/orders/my/` | JWT | List the current user's order summaries |
+| `GET` | `/api/orders/my/<id>/` | JWT | Retrieve an owned order and paid fulfilment details |
+| `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
+| `POST` | `/api/orders/<id>/pay/` | JWT | Run the local simulated payment flow |
+
+Regular users can access only their own orders. Staff users can access all
+orders. See the [architecture documentation](docs/ARCHITECTURE.md) for payment,
+concurrency, fulfilment, and data-exposure guarantees.
 
 ## Telegram Bot
 
-The bot currently provides:
+The bot supports:
 
-- `/start` — synchronizes the Telegram identity with the backend and stores the
-  returned JWTs.
-- `/catalogue` — displays the paginated product catalogue.
-- Product detail navigation through inline keyboards.
-- `/profile` — synchronizes when necessary and displays the backend user profile.
-- `/cart` and the main-menu Cart button — display the authenticated cart.
-- Add-to-cart controls on product details.
-- Quantity increase/decrease, removal, and confirmed cart clearing.
-- Confirmed order creation with a localized order summary.
-- English and Russian interface text and language selection.
-- Friendly handling of backend, timeout, and malformed-response errors.
-- Refresh-token handling with a single retry of a rejected protected request.
+- `/start` for Telegram authentication and synchronization.
+- `/catalogue` for catalogue browsing and product details.
+- `/profile` for the synchronized backend profile.
+- `/cart` for cart management and checkout.
+- `/orders` for personal order summaries and details.
+- English and Russian interface text.
+- Automatic access-token refresh with one retry.
 
-Tokens and language preferences are process-local and are lost when the bot
-restarts. They are not shared between bot replicas.
+Tokens and language preferences are currently process-local and are lost when
+the bot restarts.
 
-## Local Setup
-
-The recommended development workflow uses Docker Compose and requires Docker
-with the Compose plugin.
-
-1. Copy the environment template:
-
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Set non-empty values for `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`,
-   `BOT_TOKEN`, and `BOT_INTERNAL_SECRET`. The same `.env` file is loaded by the
-   backend and bot, so the internal secret is shared automatically.
-
-3. Build and start the services:
-
-   ```bash
-   docker compose up --build
-   ```
-
-4. In another terminal, apply migrations:
-
-   ```bash
-   docker compose exec backend uv run python manage.py migrate
-   ```
-
-5. Create a superuser for Django admin and protected product management:
-
-   ```bash
-   docker compose exec backend uv run python manage.py createsuperuser
-   ```
-
-The API is then available at `http://localhost:8000/`. The bot starts long
-polling when its required environment variables are configured.
-
-### Celery development check
-
-Redis is used only as Celery's broker; task results are not stored. View worker
-output with:
-
-```bash
-docker compose logs -f celery_worker
-```
-
-To send the diagnostic task through Redis from the backend container:
-
-```bash
-docker compose exec backend uv run python manage.py shell -c \
-  "from apps.core.tasks import log_worker_probe; print(log_worker_probe.delay('manual-worker-probe').id)"
-```
-
-The worker log records `Celery diagnostic task executed` with the diagnostic
-message.
-
-Successful simulated direct-order payments also queue an order confirmation
-after the database transaction commits. The local default is Django's console
-email backend, so the complete email appears in the Celery worker output:
-
-```bash
-docker compose logs -f celery_worker
-```
-
-Set the SMTP-related email environment variables only when connecting an SMTP
-server. No SMTP server is included in Docker Compose.
+## Development
 
 ### Tests
 
@@ -290,111 +177,79 @@ docker compose exec backend uv run pytest
 docker compose run --rm bot uv run pytest
 ```
 
-They can also be run from each package directory after `uv sync`:
+To run tests without Docker, use `uv sync` followed by `uv run pytest` from each
+package directory.
 
-```bash
-cd backend
-uv sync
-uv run pytest
-
-cd ../bot
-uv sync
-uv run pytest
-```
-
-### Ruff
-
-Run Ruff separately for both Python packages:
+### Linting
 
 ```bash
 docker compose exec backend uv run ruff check .
 docker compose run --rm bot uv run ruff check .
 ```
 
-For local `uv` environments, run `uv run ruff check .` from `backend/` and
+For local environments, run `uv run ruff check .` from both `backend/` and
 `bot/`.
 
-## Environment Variables
+### Celery
 
-Copy `.env.example` and provide local values; do not commit `.env` or real
-secrets.
+Follow worker output with:
+
+```bash
+docker compose logs -f celery_worker
+```
+
+Send the diagnostic task from the backend container with:
+
+```bash
+docker compose exec backend uv run python manage.py shell -c \
+  "from apps.core.tasks import log_worker_probe; print(log_worker_probe.delay('manual-worker-probe').id)"
+```
+
+Redis is used as the Celery broker; task results are not stored. The local
+console email backend also writes eligible order-confirmation emails to worker
+output.
+
+## Configuration
+
+Copy `.env.example` to `.env`; never commit real secrets.
 
 | Variable | Purpose |
 | --- | --- |
 | `DJANGO_SECRET_KEY` | Django cryptographic signing key |
-| `DJANGO_DEBUG` | Enables or disables Django debug mode |
-| `DJANGO_ALLOWED_HOSTS` | Comma-separated allowed host names |
-| `BOT_INTERNAL_SECRET` | Shared secret for the internal Telegram auth endpoint |
-| `POSTGRES_DB` | PostgreSQL database name |
-| `POSTGRES_USER` | PostgreSQL user |
-| `POSTGRES_PASSWORD` | PostgreSQL password |
-| `POSTGRES_HOST` | PostgreSQL host name |
-| `POSTGRES_PORT` | PostgreSQL port |
-| `CELERY_BROKER_URL` | Celery broker URL; Compose uses the `redis` service |
-| `EMAIL_BACKEND` | Django email backend; defaults to console output |
-| `EMAIL_HOST` | SMTP host when using Django's SMTP backend |
-| `EMAIL_PORT` | SMTP port |
-| `EMAIL_HOST_USER` | Optional SMTP username |
-| `EMAIL_HOST_PASSWORD` | Optional SMTP password |
-| `EMAIL_USE_TLS` | Enables SMTP STARTTLS when set to `True` |
-| `EMAIL_TIMEOUT` | Email connection timeout in seconds |
-| `DEFAULT_FROM_EMAIL` | Sender used for transactional order email |
+| `DJANGO_DEBUG` | Django debug mode |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated allowed hosts |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | PostgreSQL credentials |
+| `POSTGRES_HOST`, `POSTGRES_PORT` | PostgreSQL connection |
+| `CELERY_BROKER_URL` | Celery broker URL |
+| `EMAIL_BACKEND` | Django email backend |
+| `EMAIL_HOST`, `EMAIL_PORT` | SMTP server |
+| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | Optional SMTP credentials |
+| `EMAIL_USE_TLS`, `EMAIL_TIMEOUT` | SMTP transport settings |
+| `DEFAULT_FROM_EMAIL` | Transactional email sender |
 | `BOT_TOKEN` | Telegram Bot API token |
-| `BOT_BACKEND_BASE_URL` | Backend base URL used by the bot |
-| `BOT_API_TIMEOUT` | Backend request timeout in seconds |
+| `BOT_INTERNAL_SECRET` | Shared secret for Telegram authentication |
+| `BOT_BACKEND_BASE_URL` | Backend URL used by the bot |
+| `BOT_API_TIMEOUT` | Backend request timeout |
 | `BOT_DEFAULT_LANGUAGE` | Default bot language (`en` or `ru`) |
 
-## Project Structure
+## Repository Layout
 
 ```text
 ludora/
-├── backend/
-│   ├── apps/
-│   │   ├── core/            # Cross-cutting infrastructure and diagnostic tasks
-│   │   ├── authentication/  # Email/JWT and internal Telegram authentication
-│   │   ├── carts/           # Persistent carts, cart items, checkout API/services
-│   │   ├── games/           # Products, platforms, categories, and license keys
-│   │   ├── orders/          # Orders, order items, payments, APIs, and services
-│   │   ├── payments/        # Provider contract and local payment simulation
-│   │   └── users/           # Custom email-based user model
-│   ├── config/              # Django settings, Celery app, and root URLs
-│   ├── manage.py
-│   ├── entrypoint.sh
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── bot/
-│   ├── app/
-│   │   ├── api/             # Typed asynchronous backend client
-│   │   ├── auth/            # Telegram auth service and token storage
-│   │   ├── handlers/        # Start, catalogue, profile, and cart handlers
-│   │   ├── keyboards/       # Inline and reply keyboards
-│   │   ├── localization/    # English/Russian messages and preferences
-│   │   └── presentation/    # Telegram-safe response formatting
-│   ├── tests/
-│   ├── Dockerfile
-│   └── pyproject.toml
-├── docker-compose.yml
-├── .env.example
+├── backend/                 # Django API, domain apps, admin, and Celery worker
+├── bot/                     # aiogram Telegram client
+├── docs/ARCHITECTURE.md     # Architecture and implementation decisions
+├── docker-compose.yml       # Local service topology
+├── .env.example             # Configuration template
 └── README.md
 ```
 
 ## Roadmap
 
-The next planned marketplace features are:
+- Complete the Telegram payment-status and fulfilment flow.
+- Integrate a production payment provider.
+- Extend confirmation email to multi-item cart orders.
+- Move bot token and language storage to shared Redis-backed storage.
 
-- [x] Cart
-- [x] Cart items
-- [x] Order creation from a cart
-- [ ] External payment integration
-- [ ] License-key delivery through the bot
-- [ ] Redis-backed token storage
-- [ ] Order history in the Telegram bot
-
-## Release
-
-**v0.2.0 — Telegram authentication completed**
-
-This portfolio release includes internal Telegram authentication, Telegram user
-synchronization, bot profiles, JWT refresh, and one-time retry behavior. The
-backend commerce logic predates the planned end-to-end cart, checkout, payment
-provider, and bot delivery experience.
+The repository contains subsequent
+cart, fulfilment, admin, and order-history work.
