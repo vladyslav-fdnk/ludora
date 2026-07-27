@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db import connection
+from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
 
@@ -180,3 +180,131 @@ class DirectOrderBackfillMigrationTests(TransactionTestCase):
         self.assertFalse(
             OrderItem.objects.filter(order_id=self.blank_title_order_id).exists()
         )
+
+
+class LicenseAssignmentBackfillMigrationTests(TransactionTestCase):
+    migrate_from = ("orders", "0008_order_financial_constraints")
+    migrate_to = ("orders", "0009_licenseassignment")
+
+    def setUp(self):
+        super().setUp()
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_from])
+        old_apps = self.executor.loader.project_state([self.migrate_from]).apps
+        self._create_orders(old_apps)
+
+        self.executor = MigrationExecutor(connection)
+        with self.assertLogs(
+            "apps.orders.migrations.0009_licenseassignment",
+            level="WARNING",
+        ) as migration_logs:
+            self.executor.migrate([self.migrate_to])
+        self.migration_logs = migration_logs.output
+        self.apps = self.executor.loader.project_state([self.migrate_to]).apps
+
+    def tearDown(self):
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+        super().tearDown()
+
+    def _create_orders(self, apps):
+        LicenseKey = apps.get_model("games", "LicenseKey")
+        Order = apps.get_model("orders", "Order")
+        OrderItem = apps.get_model("orders", "OrderItem")
+        Platform = apps.get_model("games", "Platform")
+        Product = apps.get_model("games", "Product")
+
+        platform = Platform.objects.create(name="Steam", slug="assignment-steam")
+        product = Product.objects.create(
+            title="Assigned Game",
+            slug="assigned-game",
+            product_type="GAME",
+            platform=platform,
+            price=Decimal("49.99"),
+        )
+        assigned_key = LicenseKey.objects.create(
+            product=product,
+            value="ASSIGNED-KEY",
+            status="SOLD",
+        )
+        paid_order = Order.objects.create(
+            product=product,
+            email="paid@example.com",
+            source="DIRECT",
+            status="PAID",
+            license_key=assigned_key,
+        )
+        self.paid_item_id = OrderItem.objects.create(
+            order=paid_order,
+            product=product,
+            product_title=product.title,
+            quantity=1,
+            unit_price=product.price,
+        ).pk
+        self.assigned_key_id = assigned_key.pk
+
+        malformed_key = LicenseKey.objects.create(
+            product=product,
+            value="MALFORMED-KEY",
+            status="SOLD",
+        )
+        self.malformed_order_id = Order.objects.create(
+            product=product,
+            email="malformed@example.com",
+            source="DIRECT",
+            status="PAID",
+            license_key=malformed_key,
+        ).pk
+        self.malformed_key_id = malformed_key.pk
+
+        unassigned_key = LicenseKey.objects.create(
+            product=product,
+            value="UNASSIGNED-KEY",
+            status="AVAILABLE",
+        )
+        unpaid_order = Order.objects.create(
+            product=product,
+            email="unpaid@example.com",
+            source="DIRECT",
+            status="CREATED",
+            license_key=unassigned_key,
+        )
+        OrderItem.objects.create(
+            order=unpaid_order,
+            product=product,
+            product_title=product.title,
+            quantity=1,
+            unit_price=product.price,
+        )
+
+    def test_backfills_only_paid_direct_order_license_keys(self):
+        LicenseAssignment = self.apps.get_model("orders", "LicenseAssignment")
+
+        assignment = LicenseAssignment.objects.get()
+        self.assertEqual(assignment.order_item_id, self.paid_item_id)
+        self.assertEqual(assignment.license_key_id, self.assigned_key_id)
+
+    def test_skips_and_reports_paid_direct_order_without_order_item(self):
+        LicenseAssignment = self.apps.get_model("orders", "LicenseAssignment")
+
+        self.assertFalse(
+            LicenseAssignment.objects.filter(
+                license_key_id=self.malformed_key_id
+            ).exists()
+        )
+        self.assertTrue(
+            any(
+                str(self.malformed_order_id) in message
+                and "without exactly one OrderItem" in message
+                for message in self.migration_logs
+            )
+        )
+
+    def test_license_key_can_only_be_assigned_once(self):
+        LicenseAssignment = self.apps.get_model("orders", "LicenseAssignment")
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            LicenseAssignment.objects.create(
+                order_item_id=self.paid_item_id,
+                license_key_id=self.assigned_key_id,
+            )

@@ -152,6 +152,22 @@ class OrderItem(models.Model):
         return f"{self.product_title} × {self.quantity}"
 
 
+class LicenseAssignment(models.Model):
+    order_item = models.ForeignKey(
+        OrderItem,
+        on_delete=models.CASCADE,
+        related_name="license_assignments",
+    )
+    license_key = models.OneToOneField(
+        "games.LicenseKey",
+        on_delete=models.PROTECT,
+        related_name="license_assignment",
+    )
+
+    def __str__(self):
+        return f"License assignment #{self.pk}"
+
+
 class Payment(models.Model):
     class Status(models.TextChoices):
         CREATED = "CREATED", "Created"
