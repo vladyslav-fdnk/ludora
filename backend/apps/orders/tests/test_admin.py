@@ -104,6 +104,19 @@ class TransactionAdminTests(TestCase):
         self.assertContains(response, "Paid at")
         self.assertContains(response, ">Paid</span>", html=False)
 
+    def test_order_deletion_is_disabled(self):
+        delete_response = self.client.post(
+            reverse("admin:orders_order_delete", args=(self.order.pk,)),
+            {"post": "yes"},
+        )
+        changelist_response = self.client.get(
+            reverse("admin:orders_order_changelist")
+        )
+
+        self.assertEqual(delete_response.status_code, 403)
+        self.assertTrue(Order.objects.filter(pk=self.order.pk).exists())
+        self.assertIsNone(changelist_response.context["action_form"])
+
     def test_payment_changelist_displays_diagnostics_and_status_badge(self):
         response = self.client.get(reverse("admin:orders_payment_changelist"))
 

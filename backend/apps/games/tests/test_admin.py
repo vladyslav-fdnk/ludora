@@ -430,6 +430,47 @@ class LicenseKeyAdminTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertTrue(LicenseKey.objects.filter(pk=sold_key.pk).exists())
 
+    def test_bulk_delete_preserves_sold_keys_and_deletes_available_keys(self):
+        sold_key = LicenseKey.objects.create(
+            product=self.product,
+            value="SOLD-BULK-KEY",
+            status=LicenseKey.Status.SOLD,
+        )
+        available_key = LicenseKey.objects.create(
+            product=self.product,
+            value="AVAILABLE-BULK-KEY",
+        )
+
+        response = self.client.post(
+            reverse("admin:games_licensekey_changelist"),
+            {
+                "action": "delete_selected",
+                "_selected_action": [sold_key.pk, available_key.pk],
+                "post": "yes",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(LicenseKey.objects.filter(pk=sold_key.pk).exists())
+        self.assertFalse(LicenseKey.objects.filter(pk=available_key.pk).exists())
+
+    def test_available_key_can_be_deleted_from_admin(self):
+        available_key = LicenseKey.objects.create(
+            product=self.product,
+            value="AVAILABLE-DELETE-KEY",
+        )
+
+        response = self.client.post(
+            reverse(
+                "admin:games_licensekey_delete",
+                args=(available_key.pk,),
+            ),
+            {"post": "yes"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(LicenseKey.objects.filter(pk=available_key.pk).exists())
+
     def test_available_key_remains_editable(self):
         available_key = LicenseKey.objects.create(
             product=self.product,

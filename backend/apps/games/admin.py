@@ -1,4 +1,5 @@
 from django.contrib import admin, messages
+from django.contrib.admin.actions import delete_selected as admin_delete_selected
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q
@@ -235,6 +236,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 @admin.register(LicenseKey)
 class LicenseKeyAdmin(admin.ModelAdmin):
+    actions = ("delete_selected",)
     list_display = ("product", "masked_key", "is_sold", "assigned_order")
     list_filter = ("status", "product", "product__platform")
     search_fields = ("value", "product__title", "order__order_number")
@@ -271,3 +273,11 @@ class LicenseKeyAdmin(admin.ModelAdmin):
         if obj and obj.status == LicenseKey.Status.SOLD:
             return False
         return super().has_delete_permission(request, obj)
+
+    @admin.action(description="Delete selected license keys")
+    def delete_selected(self, request, queryset):
+        return admin_delete_selected(
+            self,
+            request,
+            queryset.exclude(status=LicenseKey.Status.SOLD),
+        )
