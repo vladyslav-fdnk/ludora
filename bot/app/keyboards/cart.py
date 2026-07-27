@@ -1,9 +1,14 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.api.schemas import Cart
+from app.api.schemas import Cart, Payment
 from app.localization import Translator
 
-from .callbacks import CartActionCallback, CartItemCallback, CataloguePageCallback
+from .callbacks import (
+    CartActionCallback,
+    CartItemCallback,
+    CataloguePageCallback,
+    PaymentStatusCallback,
+)
 
 
 def added_to_cart_keyboard(
@@ -93,6 +98,46 @@ def confirmation_keyboard(
                     text=translator.get("button.cancel", language),
                     callback_data="cart",
                 ),
+            ]
+        ]
+    )
+
+
+def payment_keyboard(
+    payment: Payment, owner_id: int, language: str, translator: Translator
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=translator.get("button.pay", language),
+                    url=payment.payment_url,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text=translator.get("button.check_payment", language),
+                    callback_data=PaymentStatusCallback(
+                        order_id=payment.order, owner_id=owner_id
+                    ).pack(),
+                )
+            ],
+        ]
+    )
+
+
+def payment_status_keyboard(
+    order_id: int, owner_id: int, language: str, translator: Translator
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=translator.get("button.check_payment", language),
+                    callback_data=PaymentStatusCallback(
+                        order_id=order_id, owner_id=owner_id
+                    ).pack(),
+                )
             ]
         ]
     )

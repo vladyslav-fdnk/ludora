@@ -14,6 +14,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.continue_shopping": "Continue shopping",
         "button.clear_cart": "Clear cart",
         "button.checkout": "Create order",
+        "button.pay": "Pay now",
+        "button.check_payment": "Check payment status",
         "button.confirm": "Confirm",
         "button.cancel": "Cancel",
         "button.english": "English",
@@ -94,6 +96,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "checkout.success": "<b>Order {order_number} created</b>",
         "checkout.item": "{title} × {quantity} — {line_total}",
         "checkout.total": "<b>Order total:</b> {total}",
+        "payment.created": (
+            "<b>Payment created</b>\n"
+            "Amount: {amount}\nStatus: {status}\n\n"
+            "Use the button below to complete payment."
+        ),
+        "payment.pending": (
+            "<b>Payment status:</b> {status}\n"
+            "Payment has not been completed yet."
+        ),
+        "payment.completed": "<b>Payment completed successfully!</b>",
+        "payment.missing": "Payment information is not available yet.",
         "type.GAME": "Game",
         "type.DLC": "DLC",
         "type.SUBSCRIPTION": "Subscription",
@@ -116,6 +129,8 @@ MESSAGES: dict[str, dict[str, str]] = {
         "button.continue_shopping": "Продолжить покупки",
         "button.clear_cart": "Очистить корзину",
         "button.checkout": "Создать заказ",
+        "button.pay": "Оплатить",
+        "button.check_payment": "Проверить статус оплаты",
         "button.confirm": "Подтвердить",
         "button.cancel": "Отмена",
         "button.english": "English",
@@ -194,6 +209,17 @@ MESSAGES: dict[str, dict[str, str]] = {
         "checkout.success": "<b>Заказ {order_number} создан</b>",
         "checkout.item": "{title} × {quantity} — {line_total}",
         "checkout.total": "<b>Сумма заказа:</b> {total}",
+        "payment.created": (
+            "<b>Платёж создан</b>\n"
+            "Сумма: {amount}\nСтатус: {status}\n\n"
+            "Используйте кнопку ниже, чтобы завершить оплату."
+        ),
+        "payment.pending": (
+            "<b>Статус платежа:</b> {status}\n"
+            "Платёж ещё не завершён."
+        ),
+        "payment.completed": "<b>Платёж успешно завершён!</b>",
+        "payment.missing": "Информация о платеже пока недоступна.",
         "type.GAME": "Игра",
         "type.DLC": "Дополнение",
         "type.SUBSCRIPTION": "Подписка",

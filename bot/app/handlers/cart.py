@@ -1,3 +1,5 @@
+from html import escape
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -8,14 +10,17 @@ from app.keyboards.callbacks import (
     AddCartCallback,
     CartActionCallback,
     CartItemCallback,
+    PaymentStatusCallback,
 )
 from app.keyboards.cart import (
     added_to_cart_keyboard,
     cart_keyboard,
     confirmation_keyboard,
+    payment_keyboard,
+    payment_status_keyboard,
 )
 from app.localization import LanguagePreferences, Translator
-from app.presentation import format_cart, format_order
+from app.presentation import format_cart, format_order_detail
 
 from .common import active_language, show_error
 
@@ -172,9 +177,20 @@ async def cart_action(
                 )
         else:
             order = await auth_service.checkout_cart(callback.from_user)
+            payment = await auth_service.create_payment(
+                callback.from_user, order.id
+            )
             if callback.message:
                 await callback.message.edit_text(
-                    format_order(order, language, translator)
+                    translator.get(
+                        "payment.created",
+                        language,
+                        amount=format(payment.amount, ".2f"),
+                        status=escape(payment.status),
+                    ),
+                    reply_markup=payment_keyboard(
+                        payment, callback_data.owner_id, language, translator
+                    ),
                 )
     except APIError as error:
         await show_error(callback, error, language, translator)
@@ -182,7 +198,64 @@ async def cart_action(
         await show_error(callback, error, language, translator)
 
 
-@router.callback_query(F.data.regexp(r"^(add|cit|crt):"))
+@router.callback_query(PaymentStatusCallback.filter())
+async def check_payment_status(
+    callback: CallbackQuery,
+    callback_data: PaymentStatusCallback,
+    auth_service: TelegramAuthService,
+    translator: Translator,
+    language_preferences: LanguagePreferences,
+) -> None:
+    await callback.answer()
+    language = active_language(callback.from_user, language_preferences)
+    if not _owned(callback, callback_data.owner_id):
+        if callback.message:
+            await callback.message.edit_text(
+                translator.get("error.invalid_callback", language)
+            )
+        return
+    try:
+        order = await auth_service.get_my_order(
+            callback.from_user, callback_data.order_id
+        )
+        if not callback.message:
+            return
+        if order.status == "PAID":
+            await callback.message.edit_text(
+                "\n\n".join(
+                    (
+                        translator.get("payment.completed", language),
+                        format_order_detail(order, language, translator),
+                    )
+                )
+            )
+            return
+        if not order.payments:
+            await callback.message.edit_text(
+                translator.get("payment.missing", language)
+            )
+            return
+        latest_payment = order.payments[-1]
+        await callback.message.edit_text(
+            translator.get(
+                "payment.pending",
+                language,
+                status=escape(latest_payment.status),
+            ),
+            reply_markup=payment_status_keyboard(
+                callback_data.order_id,
+                callback_data.owner_id,
+                language,
+                translator,
+            ),
+        )
+    except APIError as error:
+        await show_error(callback, error, language, translator)
+    except Exception as error:
+        await show_error(callback, error, language, translator)
+
+
+@router.callback_query(F.data.regexp(r"^(add|cit|crt|pay):"))
 async def invalid_cart_callback(
     callback: CallbackQuery,
     translator: Translator,

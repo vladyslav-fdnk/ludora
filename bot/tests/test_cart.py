@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -7,15 +8,32 @@ import pytest
 
 from app.api import BackendClient
 from app.api.exceptions import BackendUnavailable, InvalidResponse, ValidationFailed
-from app.api.schemas import Cart, CartItem, CheckoutOrder, OrderItem, Product
+from app.api.schemas import (
+    Cart,
+    CartItem,
+    CheckoutOrder,
+    LicenseAssignment,
+    OrderDetail,
+    OrderDetailItem,
+    OrderItem,
+    OrderPayment,
+    Payment,
+    Product,
+)
 from app.auth import AuthTokens, InMemoryTokenStorage
 from app.handlers.cart import (
     add_to_cart,
     cart_action,
     cart_command,
     change_cart_item,
+    check_payment_status,
 )
-from app.keyboards.callbacks import AddCartCallback, CartActionCallback, CartItemCallback
+from app.keyboards.callbacks import (
+    AddCartCallback,
+    CartActionCallback,
+    CartItemCallback,
+    PaymentStatusCallback,
+)
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_cart, format_order
 
@@ -32,6 +50,37 @@ def cart(quantity=2, title="<Game>"):
 def order():
     item = OrderItem(1, "<Game>", 2, Decimal("12.50"), Decimal("25.00"))
     return CheckoutOrder(9, "LUD-<123>", "CREATED", Decimal("25.00"), (item,))
+
+
+def payment():
+    return Payment(4, 9, "PENDING", Decimal("25.00"), "https://pay.test/4")
+
+
+def detail(status="CREATED", payment_status="PENDING", with_keys=False):
+    assignments = (
+        (LicenseAssignment(3, "KEY-<123>"),) if with_keys else ()
+    )
+    item = OrderDetailItem(
+        1, "<Game>", 2, Decimal("12.50"), Decimal("25.00"), assignments
+    )
+    backend_payment = OrderPayment(
+        4,
+        payment_status,
+        "provider",
+        "tx-4",
+        Decimal("25.00"),
+        datetime(2026, 7, 27, tzinfo=UTC),
+        datetime(2026, 7, 27, tzinfo=UTC) if status == "PAID" else None,
+    )
+    return OrderDetail(
+        9,
+        "LUD-123",
+        status,
+        Decimal("25.00"),
+        datetime(2026, 7, 27, tzinfo=UTC),
+        (item,),
+        (backend_payment,),
+    )
 
 
 def message(language="en"):
@@ -142,7 +191,11 @@ async def test_clear_and_checkout_confirmations_and_success():
     translator = Translator()
     preferences = LanguagePreferences()
     confirm = callback()
-    auth = SimpleNamespace(clear_cart=AsyncMock(), checkout_cart=AsyncMock(return_value=order()))
+    auth = SimpleNamespace(
+        clear_cart=AsyncMock(),
+        checkout_cart=AsyncMock(return_value=order()),
+        create_payment=AsyncMock(return_value=payment()),
+    )
     await cart_action(
         confirm,
         CartActionCallback(action="clear", owner_id=123),
@@ -174,7 +227,69 @@ async def test_clear_and_checkout_confirmations_and_success():
         translator,
         preferences,
     )
-    assert "Order LUD-&lt;123&gt; created" in confirm.message.edit_text.await_args.args[0]
+    auth.create_payment.assert_awaited_once_with(confirm.from_user, 9)
+    assert "Payment created" in confirm.message.edit_text.await_args.args[0]
+    markup = confirm.message.edit_text.await_args.kwargs["reply_markup"]
+    assert markup.inline_keyboard[0][0].url == "https://pay.test/4"
+    assert markup.inline_keyboard[1][0].text == "Check payment status"
+
+
+async def test_payment_status_refreshes_from_backend():
+    event = callback()
+    auth = SimpleNamespace(get_my_order=AsyncMock(return_value=detail()))
+
+    await check_payment_status(
+        event,
+        PaymentStatusCallback(order_id=9, owner_id=123),
+        auth,
+        Translator(),
+        LanguagePreferences(),
+    )
+
+    auth.get_my_order.assert_awaited_once_with(event.from_user, 9)
+    text = event.message.edit_text.await_args.args[0]
+    assert "PENDING" in text
+    assert "not been completed" in text
+
+
+async def test_completed_payment_immediately_shows_backend_license_keys():
+    event = callback()
+    auth = SimpleNamespace(
+        get_my_order=AsyncMock(
+            return_value=detail(
+                status="PAID", payment_status="PAID", with_keys=True
+            )
+        )
+    )
+
+    await check_payment_status(
+        event,
+        PaymentStatusCallback(order_id=9, owner_id=123),
+        auth,
+        Translator(),
+        LanguagePreferences(),
+    )
+
+    text = event.message.edit_text.await_args.args[0]
+    assert "Payment completed successfully" in text
+    assert "License keys" in text
+    assert "<code>KEY-&lt;123&gt;</code>" in text
+
+
+async def test_payment_status_callback_validates_owner():
+    event = callback()
+    auth = SimpleNamespace(get_my_order=AsyncMock())
+
+    await check_payment_status(
+        event,
+        PaymentStatusCallback(order_id=9, owner_id=999),
+        auth,
+        Translator(),
+        LanguagePreferences(),
+    )
+
+    auth.get_my_order.assert_not_awaited()
+    assert "invalid or outdated" in event.message.edit_text.await_args.args[0]
 
 
 @pytest.mark.parametrize(
@@ -249,3 +364,36 @@ async def test_typed_client_rejects_malformed_cart_and_maps_validation():
             await client.add_cart_item(123, 1)
     finally:
         await client.close()
+
+
+async def test_typed_client_creates_payment():
+    async def handler(request):
+        assert request.url.path == "/api/orders/payments/"
+        assert request.headers["Authorization"] == "Bearer access"
+        assert request.method == "POST"
+        assert request.content == b'{"order":9}'
+        return httpx.Response(
+            201,
+            json={
+                "id": 4,
+                "order": 9,
+                "status": "PENDING",
+                "amount": "25.00",
+                "payment_url": "https://pay.test/4",
+            },
+        )
+
+    storage = InMemoryTokenStorage()
+    await storage.set(123, AuthTokens("access", "refresh"))
+    client = BackendClient(
+        "http://backend",
+        1,
+        token_storage=storage,
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await client.create_payment(123, 9)
+    finally:
+        await client.close()
+
+    assert result == payment()

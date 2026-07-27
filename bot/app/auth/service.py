@@ -2,7 +2,14 @@ from typing import Any
 
 from app.api import BackendClient
 from app.api.exceptions import AuthenticationRequired, MissingTelegramUser
-from app.api.schemas import Cart, CartItem, CheckoutOrder, OrderDetail, OrderSummary
+from app.api.schemas import (
+    Cart,
+    CartItem,
+    CheckoutOrder,
+    OrderDetail,
+    OrderSummary,
+    Payment,
+)
 
 from .models import AuthResult, BackendUser, TelegramIdentity
 from .storage import TokenStorage
@@ -59,6 +66,11 @@ class TelegramAuthService:
 
     async def checkout_cart(self, telegram_user: Any) -> CheckoutOrder:
         return await self._protected(telegram_user, self._client.checkout_cart)
+
+    async def create_payment(self, telegram_user: Any, order_id: int) -> Payment:
+        return await self._protected(
+            telegram_user, self._client.create_payment, order_id
+        )
 
     async def get_my_orders(self, telegram_user: Any) -> tuple[OrderSummary, ...]:
         return await self._protected(telegram_user, self._client.get_my_orders)
