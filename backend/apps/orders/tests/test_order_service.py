@@ -9,7 +9,7 @@ from kombu.exceptions import OperationalError
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
-from apps.orders.services import pay_order
+from apps.orders.services import complete_payment, pay_order
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
 
@@ -72,6 +72,74 @@ class OrderServiceTests(TestCase):
             LicenseKey.Status.SOLD,
         )
         dispatch_email.assert_called_once_with(order.id)
+
+    def test_complete_payment_is_idempotent(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=Decimal("59.99"),
+            provider="local",
+            transaction_id="local-pay-idempotent",
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first = complete_payment(payment.id)
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as duplicate_dispatch,
+            self.captureOnCommitCallbacks(execute=True) as callbacks,
+        ):
+            second = complete_payment(payment.id)
+
+        self.assertFalse(first.already_completed)
+        self.assertTrue(second.already_completed)
+        self.assertEqual(second.order.id, order.id)
+        self.assertEqual(
+            LicenseAssignment.objects.filter(
+                order_item__order=order,
+            ).count(),
+            1,
+        )
+        dispatch_email.assert_called_once_with(order.id)
+        duplicate_dispatch.assert_not_called()
+        self.assertEqual(callbacks, [])
+
+    def test_complete_payment_uses_one_paid_timestamp(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.com",
+            total_price=Decimal("59.99"),
+        )
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=Decimal("59.99"),
+        )
+        paid_at = timezone.now()
+
+        with patch(
+            "apps.orders.services.timezone.now",
+            return_value=paid_at,
+        ):
+            complete_payment(payment.id)
+
+        order.refresh_from_db()
+        payment.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.paid_at, paid_at)
+        self.assertEqual(payment.paid_at, paid_at)
+        self.assertEqual(self.license_key.sold_at, paid_at)
 
     def test_pay_order_reuses_created_payment(self):
         order = Order.objects.create(
