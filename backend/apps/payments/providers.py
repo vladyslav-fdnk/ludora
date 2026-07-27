@@ -3,6 +3,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+import stripe
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 
@@ -90,6 +91,42 @@ class LocalPaymentProvider:
         return ProviderPayment(external_id=external_id, status=status)
 
 
+class StripeProvider:
+    """Stripe provider scaffold; payment operations are not available yet."""
+
+    name = "stripe"
+
+    def __init__(self) -> None:
+        self.secret_key = self._required_setting("STRIPE_SECRET_KEY")
+        self.webhook_secret = self._required_setting(
+            "STRIPE_WEBHOOK_SECRET"
+        )
+        self.currency = self._required_setting("STRIPE_CURRENCY").lower()
+        if len(self.currency) != 3 or not self.currency.isalpha():
+            raise ImproperlyConfigured(
+                "STRIPE_CURRENCY must be a three-letter currency code"
+            )
+
+        self.client = stripe.StripeClient(self.secret_key)
+
+    @staticmethod
+    def _required_setting(name: str) -> str:
+        value = getattr(settings, name, "")
+        if not isinstance(value, str) or not value.strip():
+            raise ImproperlyConfigured(
+                f"{name} must be configured when using Stripe"
+            )
+        return value.strip()
+
+    def create_payment(self, request: CreatePaymentRequest) -> ProviderPayment:
+        raise NotImplementedError("Stripe payment creation is not implemented")
+
+    def confirm_payment(self, external_id: str) -> ProviderPayment:
+        raise NotImplementedError(
+            "Stripe payment confirmation is not implemented"
+        )
+
+
 def get_payment_provider(
     provider_name: str | None = None,
 ) -> PaymentProvider:
@@ -100,6 +137,8 @@ def get_payment_provider(
     )
     if selected_name == "local":
         return LocalPaymentProvider()
+    if selected_name == "stripe":
+        return StripeProvider()
     raise ImproperlyConfigured(
         f"Unsupported payment provider: {selected_name!r}"
     )

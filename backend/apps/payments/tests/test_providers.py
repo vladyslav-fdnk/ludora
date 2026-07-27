@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from decimal import Decimal
 
+import stripe
 from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase, override_settings
 
@@ -11,6 +12,7 @@ from apps.payments.providers import (
     LocalPaymentProvider,
     PaymentProvider,
     PaymentProviderStatus,
+    StripeProvider,
     get_payment_provider,
 )
 
@@ -108,3 +110,57 @@ class PaymentProviderSelectionTests(SimpleTestCase):
     def test_empty_explicit_provider_does_not_fall_back(self):
         with self.assertRaises(ImproperlyConfigured):
             get_payment_provider("")
+
+    @override_settings(
+        PAYMENT_PROVIDER="stripe",
+        STRIPE_SECRET_KEY="sk_test_example",
+        STRIPE_WEBHOOK_SECRET="whsec_example",
+        STRIPE_CURRENCY="usd",
+    )
+    def test_stripe_selection_returns_stripe_provider(self):
+        self.assertIsInstance(get_payment_provider(), StripeProvider)
+
+
+class StripeProviderTests(SimpleTestCase):
+    valid_settings = {
+        "STRIPE_SECRET_KEY": "sk_test_example",
+        "STRIPE_WEBHOOK_SECRET": "whsec_example",
+        "STRIPE_CURRENCY": "EUR",
+    }
+
+    @override_settings(**valid_settings)
+    def test_initializes_and_implements_provider_contract(self):
+        provider = StripeProvider()
+
+        self.assertIsInstance(provider, PaymentProvider)
+        self.assertEqual(provider.name, "stripe")
+        self.assertEqual(provider.currency, "eur")
+        self.assertEqual(provider.secret_key, "sk_test_example")
+        self.assertIsInstance(provider.client, stripe.StripeClient)
+
+    def test_invalid_configuration_fails_clearly(self):
+        invalid_settings = (
+            {**self.valid_settings, "STRIPE_SECRET_KEY": ""},
+            {**self.valid_settings, "STRIPE_WEBHOOK_SECRET": " "},
+            {**self.valid_settings, "STRIPE_CURRENCY": "US"},
+        )
+
+        for configured_settings in invalid_settings:
+            with self.subTest(settings=configured_settings):
+                with override_settings(**configured_settings):
+                    with self.assertRaises(ImproperlyConfigured):
+                        StripeProvider()
+
+    @override_settings(**valid_settings)
+    def test_payment_operations_are_not_implemented(self):
+        provider = StripeProvider()
+        request = CreatePaymentRequest(
+            amount=Decimal("19.99"),
+            order_number="LUD-TESTORDER",
+            idempotency_key="payment-42",
+        )
+
+        with self.assertRaises(NotImplementedError):
+            provider.create_payment(request)
+        with self.assertRaises(NotImplementedError):
+            provider.confirm_payment("pi_example")
