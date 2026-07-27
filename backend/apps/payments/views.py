@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from apps.payments.webhooks import (
     InvalidStripeWebhook,
     parse_stripe_webhook,
+    process_stripe_webhook,
 )
 
 
@@ -34,11 +35,12 @@ class StripeWebhookAPIView(APIView):
             )
 
         try:
-            parse_stripe_webhook(
+            result = parse_stripe_webhook(
                 payload=request.body,
                 signature=request.headers.get("Stripe-Signature", ""),
                 secret=secret.strip(),
             )
+            process_stripe_webhook(result)
         except InvalidStripeWebhook:
             return Response(
                 {"error": "Invalid Stripe webhook"},

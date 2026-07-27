@@ -4,6 +4,10 @@ from json import JSONDecodeError, loads
 from typing import Any, Mapping
 
 import stripe
+from django.db import transaction
+
+from apps.orders.models import Payment
+from apps.orders.services import complete_payment
 
 
 class StripeCheckoutEventType(StrEnum):
@@ -32,6 +36,51 @@ class StripeWebhookResult:
 
 class InvalidStripeWebhook(ValueError):
     """The webhook signature or payload could not be validated."""
+
+
+@transaction.atomic
+def process_stripe_webhook(result: StripeWebhookResult) -> None:
+    """Apply a parsed Stripe Checkout event to its local payment."""
+    if not result.is_supported:
+        return
+
+    session = result.checkout_session
+    assert session is not None
+    local_payment_id = session.local_payment_id
+    if (
+        local_payment_id is None
+        or not local_payment_id.isdecimal()
+        or str(int(local_payment_id)) != local_payment_id
+    ):
+        raise InvalidStripeWebhook(
+            "Stripe Checkout Session payment reference is invalid"
+        )
+
+    try:
+        payment = Payment.objects.select_for_update().get(
+            id=int(local_payment_id)
+        )
+    except Payment.DoesNotExist as exc:
+        raise InvalidStripeWebhook("Stripe payment does not exist") from exc
+
+    if payment.provider != "stripe":
+        raise InvalidStripeWebhook("Payment provider is not Stripe")
+    if payment.transaction_id != session.id:
+        raise InvalidStripeWebhook(
+            "Stripe Checkout Session does not belong to payment"
+        )
+
+    event_type = StripeCheckoutEventType(result.event_type)
+    if event_type in (
+        StripeCheckoutEventType.COMPLETED,
+        StripeCheckoutEventType.ASYNC_PAYMENT_SUCCEEDED,
+    ):
+        complete_payment(payment.id)
+        return
+
+    if payment.status != Payment.Status.PAID:
+        payment.status = Payment.Status.FAILED
+        payment.save(update_fields=("status",))
 
 
 def parse_stripe_webhook(
