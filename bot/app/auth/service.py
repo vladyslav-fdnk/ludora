@@ -8,7 +8,6 @@ from app.api.schemas import (
     CheckoutOrder,
     OrderDetail,
     OrderSummary,
-    Payment,
 )
 
 from .models import AuthResult, BackendUser, TelegramIdentity
@@ -67,10 +66,8 @@ class TelegramAuthService:
     async def checkout_cart(self, telegram_user: Any) -> CheckoutOrder:
         return await self._protected(telegram_user, self._client.checkout_cart)
 
-    async def create_payment(self, telegram_user: Any, order_id: int) -> Payment:
-        return await self._protected(
-            telegram_user, self._client.create_payment, order_id
-        )
+    async def pay_order(self, telegram_user: Any, order_id: int) -> None:
+        await self._protected(telegram_user, self._client.pay_order, order_id)
 
     async def get_my_orders(self, telegram_user: Any) -> tuple[OrderSummary, ...]:
         return await self._protected(telegram_user, self._client.get_my_orders)

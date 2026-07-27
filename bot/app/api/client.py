@@ -26,7 +26,6 @@ from .schemas import (
     CheckoutOrder,
     OrderDetail,
     OrderSummary,
-    Payment,
     Product,
     ProductPage,
 )
@@ -127,16 +126,14 @@ class BackendClient:
             await self._authenticated_json("POST", "api/cart/checkout/", telegram_id)
         )
 
-    async def create_payment(self, telegram_id: int, order_id: int) -> Payment:
+    async def pay_order(self, telegram_id: int, order_id: int) -> None:
         if isinstance(order_id, bool) or not isinstance(order_id, int) or order_id < 1:
             raise ValueError("order_id must be a positive integer")
-        data = await self._authenticated_json(
+        await self._authenticated_json(
             "POST",
-            "api/orders/payments/",
+            f"api/orders/{order_id}/pay/",
             telegram_id,
-            json={"order": order_id},
         )
-        return Payment.from_mapping(data)
 
     async def get_my_orders(self, telegram_id: int) -> tuple[OrderSummary, ...]:
         data = await self._authenticated_json("GET", "api/orders/my/", telegram_id)

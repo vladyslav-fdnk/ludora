@@ -37,8 +37,3 @@ class CartActionCallback(CallbackData, prefix="crt"):
 class OrderDetailCallback(CallbackData, prefix="ord"):
     order_id: PositiveInt
     owner_id: PositiveInt
-
-
-class PaymentStatusCallback(CallbackData, prefix="pay"):
-    order_id: PositiveInt
-    owner_id: PositiveInt

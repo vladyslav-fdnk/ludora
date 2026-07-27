@@ -490,15 +490,14 @@ presentation.
 Cart controls call authenticated backend operations to add, update, remove, or
 clear items. Callback payloads include an owner identifier so another Telegram
 user cannot operate controls from a shared message. Checkout requires
-confirmation, creates an order, then attempts to create a payment. The bot
-expects a hosted `payment_url`, but the backend payment representation has no
-such field and the local provider exposes no hosted page, so this payment
-handoff is not currently end to end.
+confirmation, creates an order, then calls the owned order's `pay` command. The
+local provider completes the simulated payment synchronously. Afterward the bot
+fetches the private order detail and renders the authoritative paid state,
+payment metadata, and assigned license keys.
 
 The bot also exposes personal order summaries and details. Paid detail responses
-can render payment metadata and normalized license keys. This makes order
-history and key presentation implemented, but immediate post-checkout delivery
-remains dependent on completing the payment lifecycle.
+render payment metadata and normalized license keys. The same representation is
+used for immediate post-checkout delivery.
 
 The bot deliberately contains no ORM models or business calculations. Its API schemas validate backend responses, and its exception mapping converts transport, authentication,
 validation, conflict, and malformed-response conditions into user-facing behavior.
@@ -571,8 +570,6 @@ domain rules demonstrable and testable, but it is not a substitute for productio
 The following limitations are visible in the current repository:
 
 - no external payment provider or provider SDK;
-- the Telegram checkout payment contract is incomplete: the bot requires a
-  `payment_url` that the backend does not return;
 - the local provider has no hosted checkout, webhook, or independently
   advancing payment-status flow;
 - paid cart orders can be fulfilled, but their confirmation email task is
@@ -584,8 +581,6 @@ The following limitations are visible in the current repository:
 - bot tokens and language preferences are lost on restart and cannot be shared
   safely across bot replicas;
 - no inventory reservation timeout or checkout reservation lifecycle;
-- paid keys can be displayed in owner-scoped bot order details, but immediate
-  checkout-to-payment-to-delivery is not operational end to end;
 - no production deployment configuration or automated deployment pipeline;
 - the GitHub Actions workflow validates the backend and bot independently;
 - no application monitoring, tracing, or structured observability stack;
@@ -595,8 +590,8 @@ These are boundaries of the current implementation, not hidden features implied 
 
 ## Future evolution
 
-A realistic next step is to finish the backend-to-bot payment contract, then
-implement a real gateway behind the provider contract. Payment creation would
+A realistic next step is to implement a real gateway behind the provider
+contract. Payment creation would
 initiate its transaction without holding database locks across network I/O,
 while authenticated, idempotent webhooks would advance local state and
 reconcile ambiguous results. Multi-item cart fulfilment already exists; gateway

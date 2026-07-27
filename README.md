@@ -31,8 +31,8 @@ Redis, and Celery in a Docker Compose development environment.
 - Background tasks through Celery and Redis.
 
 The local payment provider is for development only; no production payment
-gateway is integrated. Telegram checkout can create a payment, but its payment
-completion UI is not yet an end-to-end flow.
+gateway is integrated. Telegram checkout runs the backend's local simulated
+payment command and then displays the updated paid order and license keys.
 
 ## Quick Start
 

@@ -193,30 +193,6 @@ class CheckoutOrder:
 
 
 @dataclass(frozen=True, slots=True)
-class Payment:
-    id: int
-    order: int
-    status: str
-    amount: Decimal
-    payment_url: str
-
-    @classmethod
-    def from_mapping(cls, value: Any) -> "Payment":
-        if not isinstance(value, dict):
-            raise InvalidResponse("Payment must be an object")
-        payment_url = value.get("payment_url")
-        if not isinstance(payment_url, str) or not payment_url:
-            raise InvalidResponse("Payment URL is invalid")
-        return cls(
-            id=_positive_int(value, "id"),
-            order=_positive_int(value, "order"),
-            status=_required_string(value, "status"),
-            amount=_decimal(value, "amount"),
-            payment_url=payment_url,
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class OrderSummary:
     id: int
     status: str
