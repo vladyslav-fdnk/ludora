@@ -3,7 +3,6 @@ import logging
 import django.db.models.deletion
 from django.db import migrations, models
 
-
 logger = logging.getLogger(__name__)
 
 
