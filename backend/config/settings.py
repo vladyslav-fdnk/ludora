@@ -21,6 +21,8 @@ PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER", "local")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 STRIPE_CURRENCY = os.getenv("STRIPE_CURRENCY", "usd")
+STRIPE_SUCCESS_URL = os.getenv("STRIPE_SUCCESS_URL", "")
+STRIPE_CANCEL_URL = os.getenv("STRIPE_CANCEL_URL", "")
 
 
 def get_list_env(name: str) -> list[str]:

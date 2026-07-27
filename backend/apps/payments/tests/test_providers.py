@@ -1,5 +1,7 @@
 from dataclasses import asdict
 from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import stripe
 from django.core.exceptions import ImproperlyConfigured
@@ -116,6 +118,8 @@ class PaymentProviderSelectionTests(SimpleTestCase):
         STRIPE_SECRET_KEY="sk_test_example",
         STRIPE_WEBHOOK_SECRET="whsec_example",
         STRIPE_CURRENCY="usd",
+        STRIPE_SUCCESS_URL="https://example.com/payments/success",
+        STRIPE_CANCEL_URL="https://example.com/payments/cancel",
     )
     def test_stripe_selection_returns_stripe_provider(self):
         self.assertIsInstance(get_payment_provider(), StripeProvider)
@@ -126,6 +130,8 @@ class StripeProviderTests(SimpleTestCase):
         "STRIPE_SECRET_KEY": "sk_test_example",
         "STRIPE_WEBHOOK_SECRET": "whsec_example",
         "STRIPE_CURRENCY": "EUR",
+        "STRIPE_SUCCESS_URL": "https://example.com/payments/success",
+        "STRIPE_CANCEL_URL": "https://example.com/payments/cancel",
     }
 
     @override_settings(**valid_settings)
@@ -136,6 +142,14 @@ class StripeProviderTests(SimpleTestCase):
         self.assertEqual(provider.name, "stripe")
         self.assertEqual(provider.currency, "eur")
         self.assertEqual(provider.secret_key, "sk_test_example")
+        self.assertEqual(
+            provider.success_url,
+            "https://example.com/payments/success",
+        )
+        self.assertEqual(
+            provider.cancel_url,
+            "https://example.com/payments/cancel",
+        )
         self.assertIsInstance(provider.client, stripe.StripeClient)
 
     def test_invalid_configuration_fails_clearly(self):
@@ -143,6 +157,8 @@ class StripeProviderTests(SimpleTestCase):
             {**self.valid_settings, "STRIPE_SECRET_KEY": ""},
             {**self.valid_settings, "STRIPE_WEBHOOK_SECRET": " "},
             {**self.valid_settings, "STRIPE_CURRENCY": "US"},
+            {**self.valid_settings, "STRIPE_SUCCESS_URL": ""},
+            {**self.valid_settings, "STRIPE_CANCEL_URL": " "},
         )
 
         for configured_settings in invalid_settings:
@@ -152,15 +168,129 @@ class StripeProviderTests(SimpleTestCase):
                         StripeProvider()
 
     @override_settings(**valid_settings)
-    def test_payment_operations_are_not_implemented(self):
+    def test_creates_checkout_session_with_amount_metadata_and_idempotency(self):
         provider = StripeProvider()
+        create = Mock(
+            return_value=SimpleNamespace(
+                id="cs_test_example",
+                url="https://checkout.stripe.com/c/pay/cs_test_example",
+            )
+        )
+        provider.client = SimpleNamespace(
+            v1=SimpleNamespace(
+                checkout=SimpleNamespace(
+                    sessions=SimpleNamespace(create=create)
+                )
+            )
+        )
         request = CreatePaymentRequest(
             amount=Decimal("19.99"),
             order_number="LUD-TESTORDER",
             idempotency_key="payment-42",
+            local_payment_id=42,
         )
 
-        with self.assertRaises(NotImplementedError):
-            provider.create_payment(request)
+        result = provider.create_payment(request)
+
+        self.assertEqual(result.external_id, "cs_test_example")
+        self.assertEqual(result.status, PaymentProviderStatus.PENDING)
+        self.assertEqual(
+            result.checkout_url,
+            "https://checkout.stripe.com/c/pay/cs_test_example",
+        )
+        create.assert_called_once()
+        params, options = create.call_args.args
+        self.assertEqual(params["mode"], "payment")
+        self.assertEqual(
+            params["success_url"],
+            "https://example.com/payments/success",
+        )
+        self.assertEqual(
+            params["cancel_url"],
+            "https://example.com/payments/cancel",
+        )
+        self.assertEqual(
+            params["client_reference_id"], "LUD-TESTORDER"
+        )
+        self.assertEqual(
+            params["line_items"][0]["price_data"]["unit_amount"], 1999
+        )
+        self.assertEqual(
+            params["line_items"][0]["price_data"]["currency"], "eur"
+        )
+        self.assertEqual(
+            params["metadata"],
+            {
+                "local_payment_id": "42",
+                "order_number": "LUD-TESTORDER",
+            },
+        )
+        self.assertEqual(options, {"idempotency_key": "payment-42"})
+
+    @override_settings(**valid_settings)
+    def test_omits_unavailable_local_payment_id_from_metadata(self):
+        provider = StripeProvider()
+        create = Mock(
+            return_value=SimpleNamespace(id="cs_test_example", url=None)
+        )
+        provider.client = SimpleNamespace(
+            v1=SimpleNamespace(
+                checkout=SimpleNamespace(
+                    sessions=SimpleNamespace(create=create)
+                )
+            )
+        )
+
+        provider.create_payment(
+            CreatePaymentRequest(
+                amount=Decimal("1.00"),
+                order_number="LUD-TESTORDER",
+                idempotency_key="payment-external",
+            )
+        )
+
+        params = create.call_args.args[0]
+        self.assertEqual(
+            params["metadata"], {"order_number": "LUD-TESTORDER"}
+        )
+
+    @override_settings(**valid_settings)
+    def test_wraps_stripe_sdk_errors(self):
+        provider = StripeProvider()
+        create = Mock(
+            side_effect=stripe.APIConnectionError("Stripe unavailable")
+        )
+        provider.client = SimpleNamespace(
+            v1=SimpleNamespace(
+                checkout=SimpleNamespace(
+                    sessions=SimpleNamespace(create=create)
+                )
+            )
+        )
+
+        with self.assertRaises(PaymentProviderRejected) as raised:
+            provider.create_payment(
+                CreatePaymentRequest(
+                    amount=Decimal("19.99"),
+                    order_number="LUD-TESTORDER",
+                    idempotency_key="payment-42",
+                )
+            )
+
+        self.assertIsInstance(raised.exception.__cause__, stripe.StripeError)
+
+    @override_settings(**valid_settings)
+    def test_rejects_amount_with_more_than_two_decimal_places(self):
+        provider = StripeProvider()
+
+        with self.assertRaises(PaymentProviderRejected):
+            provider.create_payment(
+                CreatePaymentRequest(
+                    amount=Decimal("19.999"),
+                    order_number="LUD-TESTORDER",
+                    idempotency_key="payment-42",
+                )
+            )
+
         with self.assertRaises(NotImplementedError):
             provider.confirm_payment("pi_example")

@@ -160,7 +160,14 @@ class OrderSchemaTests(APITestCase):
         self.assertEqual(request_schema["required"], ["order"])
         self.assertEqual(
             set(response_schema["properties"]),
-            {"id", "order", "status", "amount", "created_at"},
+            {
+                "id",
+                "order",
+                "status",
+                "amount",
+                "created_at",
+                "checkout_url",
+            },
         )
 
         for response_status in ("400", "404"):

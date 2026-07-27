@@ -16,6 +16,7 @@ from apps.orders.payment_services import create_payment
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import (
     LocalPaymentProvider,
+    PaymentProviderStatus,
     ProviderPayment,
 )
 
@@ -71,6 +72,33 @@ class PaymentServiceTests(TestCase):
         payment = create_payment(order, provider=provider)
 
         self.assertEqual(payment.provider, provider.name)
+
+    def test_checkout_url_is_propagated_from_provider(self):
+        class CheckoutProvider:
+            name = "checkout"
+
+            def create_payment(self, request):
+                return ProviderPayment(
+                    external_id="checkout-payment-1",
+                    status=PaymentProviderStatus.PENDING,
+                    checkout_url="https://checkout.example/payment-1",
+                )
+
+            def confirm_payment(self, external_id) -> ProviderPayment:
+                raise AssertionError("not called")
+
+        order = Order.objects.create(
+            product=self.product,
+            email="test@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+
+        payment = create_payment(order, provider=CheckoutProvider())
+
+        self.assertEqual(
+            payment.checkout_url,
+            "https://checkout.example/payment-1",
+        )
 
     def test_provider_failure_is_translated_and_rolls_back_payment(self):
         class FailingProvider:

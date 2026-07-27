@@ -53,6 +53,7 @@ def create_payment(
                 amount=amount,
                 order_number=order.order_number,
                 idempotency_key=f"payment-{payment.pk}",
+                local_payment_id=payment.pk,
             )
         )
     except PaymentProviderError as exc:
@@ -61,5 +62,6 @@ def create_payment(
     payment.provider = selected_provider.name
     payment.transaction_id = provider_payment.external_id
     payment.save(update_fields=("provider", "transaction_id"))
+    payment.checkout_url = provider_payment.checkout_url
 
     return payment

@@ -170,6 +170,7 @@ def pay_order(
                         amount=payment.amount,
                         order_number=order.order_number,
                         idempotency_key=f"payment-{payment.pk}",
+                        local_payment_id=payment.pk,
                     )
                 )
                 payment.provider = selected_provider.name

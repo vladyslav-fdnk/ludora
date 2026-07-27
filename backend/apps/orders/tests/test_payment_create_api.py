@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -5,6 +7,7 @@ from rest_framework.test import APITestCase
 
 from apps.games.models import Platform, Product
 from apps.orders.models import Order, Payment
+from apps.payments.providers import PaymentProviderStatus, ProviderPayment
 
 User = get_user_model()
 
@@ -83,6 +86,38 @@ class PaymentCreateAPIViewTests(APITestCase):
                 id=response.data["id"],
                 order=self.order,
             ).exists()
+        )
+        self.assertIsNone(response.data["checkout_url"])
+
+    def test_checkout_url_is_returned_to_client(self):
+        provider = type(
+            "CheckoutProvider",
+            (),
+            {
+                "name": "stripe",
+                "create_payment": lambda self, request: ProviderPayment(
+                    external_id="cs_test_example",
+                    status=PaymentProviderStatus.PENDING,
+                    checkout_url="https://checkout.stripe.com/example",
+                ),
+            },
+        )()
+        self.client.force_authenticate(user=self.user)
+
+        with patch(
+            "apps.orders.payment_services.get_payment_provider",
+            return_value=provider,
+        ):
+            response = self.client.post(
+                self.url,
+                {"order": self.order.id},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(
+            response.data["checkout_url"],
+            "https://checkout.stripe.com/example",
         )
 
     def test_second_payment_is_rejected_when_created_payment_exists(self):
