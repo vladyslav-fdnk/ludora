@@ -8,7 +8,7 @@ from kombu.exceptions import OperationalError
 
 from apps.games.models import LicenseKey, Product
 from apps.orders.exceptions import OrderPaymentError
-from apps.orders.models import Order, OrderItem, Payment
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import (
     CreatePaymentRequest,
@@ -169,6 +169,25 @@ def pay_order(
             license_key.status = LicenseKey.Status.SOLD
             license_key.sold_at = paid_at
             license_key.save(update_fields=("status", "sold_at"))
+
+            order_item = (
+                order.items.filter(product=order.product)
+                .order_by("id")
+                .first()
+            )
+            if order_item is None:
+                order_item = OrderItem.objects.create(
+                    order=order,
+                    product=order.product,
+                    product_title=order.product.title,
+                    quantity=1,
+                    unit_price=price_paid,
+                )
+
+            LicenseAssignment.objects.create(
+                order_item=order_item,
+                license_key=license_key,
+            )
 
             order.license_key = license_key
             order.status = Order.Status.PAID

@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import LicenseKey, Platform, Product
-from apps.orders.models import Order
+from apps.orders.models import LicenseAssignment, Order
 
 User = get_user_model()
 
@@ -64,6 +64,10 @@ class OrderTests(APITestCase):
         self.assertEqual(order.status, Order.Status.PAID)
 
         self.assertEqual(order.license_key, self.license_key)
+        assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
+        )
+        self.assertEqual(assignment.order_item.order, order)
 
         self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
 

@@ -8,7 +8,7 @@ from kombu.exceptions import OperationalError
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
-from apps.orders.models import Order, Payment
+from apps.orders.models import LicenseAssignment, Order, Payment
 from apps.orders.services import pay_order
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
@@ -61,6 +61,11 @@ class OrderServiceTests(TestCase):
             order.license_key,
             self.license_key,
         )
+        assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
+        )
+        self.assertEqual(assignment.order_item.order, order)
+        self.assertEqual(assignment.order_item.product, self.product)
 
         self.assertEqual(
             self.license_key.status,
@@ -398,6 +403,12 @@ class OrderServiceTests(TestCase):
         ):
             pay_order(order.id)
         dispatch_email.assert_called_once_with(order.id)
+        self.assertEqual(
+            LicenseAssignment.objects.filter(
+                license_key=self.license_key,
+            ).count(),
+            1,
+        )
         dispatch_email.reset_mock()
 
         with (
@@ -409,6 +420,12 @@ class OrderServiceTests(TestCase):
             pay_order(order.id)
 
         duplicate_dispatch.assert_not_called()
+        self.assertEqual(
+            LicenseAssignment.objects.filter(
+                license_key=self.license_key,
+            ).count(),
+            1,
+        )
 
     def test_cannot_pay_already_paid_order(self):
         order = Order.objects.create(
