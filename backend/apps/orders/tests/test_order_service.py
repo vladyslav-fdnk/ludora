@@ -8,7 +8,7 @@ from kombu.exceptions import OperationalError
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
-from apps.orders.models import LicenseAssignment, Order, Payment
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.orders.services import pay_order
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
@@ -544,22 +544,111 @@ class OrderServiceTests(TestCase):
         self.assertIsNone(order.price_paid)
         self.assertFalse(Payment.objects.exists())
 
-    def test_cart_order_is_rejected_by_direct_payment_flow(self):
+    def test_pay_order_fulfils_every_item_and_quantity(self):
+        second_product = Product.objects.create(
+            title="The Witcher 3",
+            slug="the-witcher-3",
+            price=Decimal("29.99"),
+            product_type="GAME",
+            platform=self.platform,
+        )
+        extra_keys = [
+            LicenseKey.objects.create(
+                product=self.product,
+                value="TEST-KEY-456",
+            ),
+            LicenseKey.objects.create(
+                product=second_product,
+                value="WITCHER-KEY-123",
+            ),
+        ]
         order = Order.objects.create(
             product=None,
             email="cart@test.com",
             source=Order.Source.CART,
-            total_price=Decimal("59.99"),
+            total_price=Decimal("149.97"),
+        )
+        first_item = OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=2,
+            unit_price=Decimal("59.99"),
+        )
+        second_item = OrderItem.objects.create(
+            order=order,
+            product=second_product,
+            product_title=second_product.title,
+            quantity=1,
+            unit_price=Decimal("29.99"),
         )
 
-        with self.assertRaisesMessage(
-            OrderPaymentError,
-            "Cart orders are not payable in this stage",
-        ):
+        pay_order(order.id)
+
+        order.refresh_from_db()
+        assignments = LicenseAssignment.objects.filter(
+            order_item__order=order
+        )
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertIsNone(order.license_key)
+        self.assertEqual(assignments.count(), 3)
+        self.assertEqual(
+            assignments.filter(order_item=first_item).count(),
+            2,
+        )
+        self.assertEqual(
+            assignments.filter(order_item=second_item).count(),
+            1,
+        )
+        for license_key in [self.license_key, *extra_keys]:
+            license_key.refresh_from_db()
+            self.assertEqual(license_key.status, LicenseKey.Status.SOLD)
+
+        with self.assertRaisesMessage(OrderPaymentError, "Already paid"):
+            pay_order(order.id)
+
+        self.assertEqual(
+            LicenseAssignment.objects.filter(order_item__order=order).count(),
+            3,
+        )
+
+    def test_insufficient_keys_for_one_item_rolls_back_all_fulfilment(self):
+        second_product = Product.objects.create(
+            title="The Witcher 3",
+            slug="the-witcher-3",
+            price=Decimal("29.99"),
+            product_type="GAME",
+            platform=self.platform,
+        )
+        order = Order.objects.create(
+            product=None,
+            email="cart@test.com",
+            source=Order.Source.CART,
+            total_price=Decimal("89.98"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=1,
+            unit_price=Decimal("59.99"),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=second_product,
+            product_title=second_product.title,
+            quantity=1,
+            unit_price=Decimal("29.99"),
+        )
+
+        with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
             pay_order(order.id)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
-        self.assertFalse(Payment.objects.exists())
+        self.assertFalse(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
+        self.assertFalse(Payment.objects.filter(order=order).exists())

@@ -123,7 +123,7 @@ class PaymentServiceTests(TestCase):
 
         self.assertFalse(Payment.objects.exists())
 
-    def test_cart_order_is_rejected_without_creating_payment(self):
+    def test_create_payment_for_cart_order(self):
         order = Order.objects.create(
             product=None,
             email="cart@test.com",
@@ -131,13 +131,10 @@ class PaymentServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
-        with self.assertRaisesMessage(
-            OrderPaymentError,
-            "Cart orders are not payable in this stage",
-        ):
-            create_payment(order)
+        payment = create_payment(order)
 
-        self.assertFalse(Payment.objects.exists())
+        self.assertEqual(payment.order, order)
+        self.assertEqual(payment.amount, Decimal("59.99"))
 
 
 class ConcurrentPaymentServiceTests(TransactionTestCase):

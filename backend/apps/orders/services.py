@@ -54,6 +54,77 @@ def payable_total(order: Order) -> Decimal:
     return order.total_price
 
 
+def get_or_create_order_items_for_fulfilment(
+    order: Order,
+    *,
+    legacy_unit_price: Decimal,
+) -> list[OrderItem]:
+    """Return the normalized items used to fulfil an order.
+
+    Pre-OrderItem orders are normalized lazily here so payment and fulfilment
+    code can operate exclusively on item collections.
+    """
+    order_items = list(
+        order.items.select_related("product").order_by("product_id", "id")
+    )
+    if order_items or order.source == Order.Source.CART:
+        return order_items
+
+    if order.product_id is not None:
+        return [
+            OrderItem.objects.create(
+                order=order,
+                product=order.product,
+                product_title=order.product.title,
+                quantity=1,
+                unit_price=legacy_unit_price,
+            )
+        ]
+
+    raise OrderPaymentError(
+        "Order has no product reference and requires manual review"
+    )
+
+
+def _fulfil_order(
+    order_items: list[OrderItem],
+    *,
+    paid_at,
+) -> list[LicenseKey]:
+    if not order_items:
+        raise OrderPaymentError(
+            "Order has no product reference and requires manual review"
+        )
+
+    assignments = []
+    license_keys = []
+    for order_item in order_items:
+        item_keys = list(
+            LicenseKey.objects.select_for_update()
+            .filter(
+                product_id=order_item.product_id,
+                status=LicenseKey.Status.AVAILABLE,
+            )
+            .order_by("id")[: order_item.quantity]
+        )
+        if len(item_keys) != order_item.quantity:
+            raise OrderPaymentError("No keys available")
+        for license_key in item_keys:
+            license_key.status = LicenseKey.Status.SOLD
+            license_key.sold_at = paid_at
+            assignments.append(
+                LicenseAssignment(
+                    order_item=order_item,
+                    license_key=license_key,
+                )
+            )
+        license_keys.extend(item_keys)
+
+    LicenseKey.objects.bulk_update(license_keys, ("status", "sold_at"))
+    LicenseAssignment.objects.bulk_create(assignments)
+    return license_keys
+
+
 def pay_order(
     order_id: int,
     *,
@@ -69,14 +140,11 @@ def pay_order(
 
         if order.status == Order.Status.PAID:
             raise OrderPaymentError("Already paid")
-        if order.source == Order.Source.CART:
-            raise OrderPaymentError("Cart orders are not payable in this stage")
-
-        if order.product_id is None:
-            raise OrderPaymentError(
-                "Order has no product reference and requires manual review"
-            )
         price_paid = payable_total(order)
+        order_items = get_or_create_order_items_for_fulfilment(
+            order,
+            legacy_unit_price=price_paid,
+        )
         payment = (
             Payment.objects.select_for_update()
             .filter(
@@ -152,44 +220,10 @@ def pay_order(
         if provider_outcome_error:
             return_order = order
         else:
-            license_key = (
-                LicenseKey.objects.select_for_update()
-                .filter(
-                    product=order.product,
-                    status=LicenseKey.Status.AVAILABLE,
-                )
-                .first()
-            )
-
-            if not license_key:
-                raise OrderPaymentError("No keys available")
-
             paid_at = timezone.now()
-
-            license_key.status = LicenseKey.Status.SOLD
-            license_key.sold_at = paid_at
-            license_key.save(update_fields=("status", "sold_at"))
-
-            order_item = (
-                order.items.filter(product=order.product)
-                .order_by("id")
-                .first()
-            )
-            if order_item is None:
-                order_item = OrderItem.objects.create(
-                    order=order,
-                    product=order.product,
-                    product_title=order.product.title,
-                    quantity=1,
-                    unit_price=price_paid,
-                )
-
-            LicenseAssignment.objects.create(
-                order_item=order_item,
-                license_key=license_key,
-            )
-
-            order.license_key = license_key
+            license_keys = _fulfil_order(order_items, paid_at=paid_at)
+            if order.source == Order.Source.DIRECT:
+                order.license_key = license_keys[0]
             order.status = Order.Status.PAID
             order.price_paid = price_paid
             order.paid_at = paid_at

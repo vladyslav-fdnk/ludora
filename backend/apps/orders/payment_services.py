@@ -2,7 +2,10 @@ from django.db import transaction
 
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import Order, Payment
-from apps.orders.services import payable_total
+from apps.orders.services import (
+    get_or_create_order_items_for_fulfilment,
+    payable_total,
+)
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import (
     CreatePaymentRequest,
@@ -23,13 +26,11 @@ def create_payment(
 
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Order already paid")
-    if order.source == Order.Source.CART:
-        raise OrderPaymentError("Cart orders are not payable in this stage")
-    if order.product_id is None:
-        raise OrderPaymentError(
-            "Order has no product reference and requires manual review"
-        )
     amount = payable_total(order)
+    get_or_create_order_items_for_fulfilment(
+        order,
+        legacy_unit_price=amount,
+    )
 
     if order.payments.filter(
         status__in=[
