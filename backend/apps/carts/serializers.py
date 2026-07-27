@@ -9,6 +9,7 @@ from apps.orders.serializers import CheckoutOrderSerializer
 
 class CartItemSerializer(serializers.ModelSerializer):
     product = ProductListSerializer(read_only=True)
+    is_active = serializers.BooleanField(source="product.is_active", read_only=True)
     unit_price = serializers.DecimalField(
         source="product.price", max_digits=10, decimal_places=2, read_only=True
     )
@@ -16,7 +17,14 @@ class CartItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CartItem
-        fields = ("id", "product", "quantity", "unit_price", "line_total")
+        fields = (
+            "id",
+            "product",
+            "quantity",
+            "is_active",
+            "unit_price",
+            "line_total",
+        )
 
     def get_line_total(self, obj) -> Decimal:
         return obj.line_total
@@ -41,6 +49,7 @@ class CartSerializer(serializers.ModelSerializer):
 class AddCartItemSerializer(serializers.Serializer):
     product = serializers.IntegerField(min_value=1)
     quantity = serializers.IntegerField(
+        default=1,
         min_value=1,
         max_value=MAX_CART_ITEM_QUANTITY,
     )
@@ -55,4 +64,3 @@ class UpdateCartItemSerializer(serializers.Serializer):
 
 class CheckoutResponseSerializer(CheckoutOrderSerializer):
     pass
-

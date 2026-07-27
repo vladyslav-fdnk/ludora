@@ -77,10 +77,32 @@ class CartAPITests(APITestCase):
         item = cart.data["items"][0]
         self.assertEqual(item["product"]["id"], self.product.pk)
         self.assertEqual(item["quantity"], 2)
+        self.assertTrue(item["is_active"])
         self.assertEqual(item["unit_price"], "12.50")
         self.assertEqual(item["line_total"], Decimal("25.00"))
         self.assertEqual(cart.data["total_quantity"], 2)
         self.assertEqual(cart.data["total_price"], Decimal("25.00"))
+
+    def test_add_defaults_quantity_to_one(self):
+        response = self.client.post(
+            "/api/cart/items/",
+            {"product": self.product.pk},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["quantity"], 1)
+        self.assertEqual(CartItem.objects.get().quantity, 1)
+
+    def test_cart_marks_deactivated_product_as_inactive(self):
+        self.add()
+        self.product.is_active = False
+        self.product.save(update_fields=("is_active",))
+
+        response = self.client.get("/api/cart/")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["items"][0]["is_active"])
 
     def test_rejects_inactive_missing_and_invalid_quantities(self):
         self.product.is_active = False
