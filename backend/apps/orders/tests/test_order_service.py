@@ -82,6 +82,7 @@ class OrderServiceTests(TestCase):
                 checkout_session=StripeCheckoutSession(
                     id=payment.transaction_id,
                     local_payment_id=str(payment.id),
+                    payment_status="paid",
                 ),
             )
         )

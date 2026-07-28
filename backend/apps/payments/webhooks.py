@@ -17,10 +17,14 @@ class StripeCheckoutEventType(StrEnum):
     EXPIRED = "checkout.session.expired"
 
 
+SUCCESSFUL_PAYMENT_STATUSES = frozenset({"paid", "no_payment_required"})
+
+
 @dataclass(frozen=True)
 class StripeCheckoutSession:
     id: str
     local_payment_id: str | None
+    payment_status: str
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,8 @@ def process_stripe_webhook(result: StripeWebhookResult) -> None:
         StripeCheckoutEventType.COMPLETED,
         StripeCheckoutEventType.ASYNC_PAYMENT_SUCCEEDED,
     ):
+        if session.payment_status not in SUCCESSFUL_PAYMENT_STATUSES:
+            return
         complete_payment(payment.id)
         return
 
@@ -125,6 +131,12 @@ def parse_stripe_webhook(
     if not isinstance(session_id, str) or not session_id:
         raise InvalidStripeWebhook("Stripe Checkout Session has no valid id")
 
+    payment_status = session.get("payment_status")
+    if not isinstance(payment_status, str):
+        raise InvalidStripeWebhook(
+            "Stripe Checkout Session has no valid payment status"
+        )
+
     metadata: Any = session.get("metadata", {})
     if not isinstance(metadata, Mapping):
         raise InvalidStripeWebhook("Stripe Checkout Session metadata is invalid")
@@ -142,5 +154,6 @@ def parse_stripe_webhook(
         checkout_session=StripeCheckoutSession(
             id=session_id,
             local_payment_id=local_payment_id,
+            payment_status=payment_status,
         ),
     )

@@ -95,6 +95,7 @@ class OrderTests(APITestCase):
                 checkout_session=StripeCheckoutSession(
                     id=self.checkout_session_id,
                     local_payment_id=str(payment.id),
+                    payment_status="paid",
                 ),
             )
         )

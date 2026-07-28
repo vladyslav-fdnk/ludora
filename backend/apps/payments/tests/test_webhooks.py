@@ -34,6 +34,7 @@ def event_payload(
     *,
     payment_id: str | None = "42",
     session_id: str = "cs_test_webhook",
+    payment_status: str = "paid",
 ) -> bytes:
     metadata = (
         {}
@@ -50,6 +51,7 @@ def event_payload(
                     "id": session_id,
                     "object": "checkout.session",
                     "metadata": metadata,
+                    "payment_status": payment_status,
                 }
             },
         },
@@ -155,6 +157,61 @@ class StripeWebhookAPITests(TestCase):
         )
         dispatch_email.assert_called_once_with(self.order.id)
         duplicate_email.assert_not_called()
+
+    def test_completed_session_with_no_payment_required_fulfils_order(self):
+        payload = event_payload(
+            "checkout.session.completed",
+            payment_id=str(self.payment.id),
+            payment_status="no_payment_required",
+        )
+
+        with (
+            patch(
+                "apps.orders.tasks.send_order_confirmation_email.delay"
+            ) as dispatch_email,
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            response = self.post(payload, stripe_signature(payload))
+
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.PAID)
+        self.assertEqual(self.payment.status, Payment.Status.PAID)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
+        self.assertTrue(
+            LicenseAssignment.objects.filter(
+                order_item__order=self.order
+            ).exists()
+        )
+        dispatch_email.assert_called_once_with(self.order.id)
+
+    def test_completed_unpaid_session_does_not_fulfil_order(self):
+        payload = event_payload(
+            "checkout.session.completed",
+            payment_id=str(self.payment.id),
+            payment_status="unpaid",
+        )
+
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ) as dispatch_email:
+            response = self.post(payload, stripe_signature(payload))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"received": True})
+        self.order.refresh_from_db()
+        self.payment.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(self.order.status, Order.Status.CREATED)
+        self.assertEqual(self.payment.status, Payment.Status.PENDING)
+        self.assertEqual(
+            self.license_key.status,
+            LicenseKey.Status.AVAILABLE,
+        )
+        self.assertFalse(LicenseAssignment.objects.exists())
+        dispatch_email.assert_not_called()
 
     def test_async_payment_failed_marks_payment_failed(self):
         payload = event_payload(
@@ -282,6 +339,10 @@ class StripeWebhookParserTests(SimpleTestCase):
                 self.assertEqual(
                     result.checkout_session.local_payment_id,
                     "42",
+                )
+                self.assertEqual(
+                    result.checkout_session.payment_status,
+                    "paid",
                 )
 
     def test_returns_structured_noop_for_unsupported_event(self):
