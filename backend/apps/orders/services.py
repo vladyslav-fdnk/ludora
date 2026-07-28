@@ -94,6 +94,128 @@ def get_or_create_order_items_for_fulfilment(
     )
 
 
+def _locked_reservation_assignments(
+    order_items: list[OrderItem],
+) -> list[LicenseAssignment]:
+    assignments = list(
+        LicenseAssignment.objects.select_for_update()
+        .filter(order_item__in=order_items)
+        .order_by("order_item_id", "id")
+    )
+    if not assignments:
+        return []
+
+    license_keys = {
+        license_key.id: license_key
+        for license_key in LicenseKey.objects.select_for_update().filter(
+            id__in=[assignment.license_key_id for assignment in assignments]
+        )
+    }
+    assignment_counts = {order_item.id: 0 for order_item in order_items}
+    order_items_by_id = {order_item.id: order_item for order_item in order_items}
+
+    for assignment in assignments:
+        order_item = order_items_by_id.get(assignment.order_item_id)
+        license_key = license_keys.get(assignment.license_key_id)
+        if (
+            order_item is None
+            or license_key is None
+            or license_key.product_id != order_item.product_id
+            or license_key.status != LicenseKey.Status.RESERVED
+        ):
+            raise OrderPaymentError("Order reservation is inconsistent")
+        assignment_counts[order_item.id] += 1
+
+    if any(assignment_counts[order_item.id] != order_item.quantity for order_item in order_items):
+        raise OrderPaymentError("Order reservation is inconsistent")
+
+    return assignments
+
+
+@transaction.atomic
+def reserve_order_licenses(order_id: int) -> list[LicenseAssignment]:
+    """Establish or reuse the complete provider-neutral order reservation."""
+    order = Order.objects.select_for_update(of=("self",)).select_related("product").get(id=order_id)
+    if order.status == Order.Status.PAID:
+        raise OrderPaymentError("Paid orders cannot reserve licenses")
+
+    order_items = get_or_create_order_items_for_fulfilment(
+        order,
+        legacy_unit_price=payable_total(order),
+    )
+    order_items = list(
+        OrderItem.objects.select_for_update()
+        .select_related("product")
+        .filter(id__in=[order_item.id for order_item in order_items])
+        .order_by("product_id", "id")
+    )
+    if not order_items:
+        raise OrderPaymentError("Order has no product reference and requires manual review")
+
+    existing_assignments = _locked_reservation_assignments(order_items)
+    if existing_assignments:
+        return existing_assignments
+
+    assignments = []
+    license_keys = []
+    for order_item in order_items:
+        item_keys = list(
+            LicenseKey.objects.select_for_update(skip_locked=True)
+            .filter(
+                product_id=order_item.product_id,
+                status=LicenseKey.Status.AVAILABLE,
+            )
+            .exclude(id__in=LicenseAssignment.objects.values("license_key_id"))
+            .order_by("id")[: order_item.quantity]
+        )
+        if len(item_keys) != order_item.quantity:
+            raise OrderPaymentError("No keys available")
+        for license_key in item_keys:
+            license_key.status = LicenseKey.Status.RESERVED
+            assignments.append(
+                LicenseAssignment(
+                    order_item=order_item,
+                    license_key=license_key,
+                )
+            )
+        license_keys.extend(item_keys)
+
+    LicenseKey.objects.bulk_update(license_keys, ("status",))
+    return LicenseAssignment.objects.bulk_create(assignments)
+
+
+@transaction.atomic
+def release_order_license_reservation(
+    order_id: int,
+) -> list[LicenseKey]:
+    """Release one unpaid order's complete provider-neutral reservation."""
+    order = Order.objects.select_for_update(of=("self",)).get(id=order_id)
+    if order.status == Order.Status.PAID:
+        raise OrderPaymentError("Paid orders cannot release licenses")
+
+    order_items = list(
+        OrderItem.objects.select_for_update().filter(order=order).order_by("product_id", "id")
+    )
+    if not order_items:
+        return []
+
+    assignments = _locked_reservation_assignments(order_items)
+    if not assignments:
+        return []
+
+    license_keys = list(
+        LicenseKey.objects.select_for_update().filter(
+            id__in=[assignment.license_key_id for assignment in assignments]
+        )
+    )
+    for license_key in license_keys:
+        license_key.status = LicenseKey.Status.AVAILABLE
+
+    LicenseKey.objects.bulk_update(license_keys, ("status",))
+    LicenseAssignment.objects.filter(id__in=[assignment.id for assignment in assignments]).delete()
+    return license_keys
+
+
 def _fulfil_order(
     order_items: list[OrderItem],
     *,
