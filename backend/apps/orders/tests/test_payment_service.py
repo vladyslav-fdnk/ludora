@@ -1,9 +1,11 @@
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from threading import Barrier
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.db import close_old_connections, connection
-from django.test import TestCase, TransactionTestCase
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
 from apps.games.models import Platform, Product
@@ -20,9 +22,31 @@ from apps.payments.providers import (
 )
 
 
-class PaymentServiceTests(TestCase):
-    def setUp(self):
+class StripeCheckoutMixin:
+    checkout_session_id = "cs_test_payment_service"
+    checkout_url = (
+        "https://checkout.stripe.com/c/pay/cs_test_payment_service"
+    )
 
+    def set_up_stripe_client(self):
+        stripe_client_patcher = patch(
+            "apps.payments.providers.stripe.StripeClient"
+        )
+        self.addCleanup(stripe_client_patcher.stop)
+        stripe_client = stripe_client_patcher.start().return_value
+        self.create_checkout_session = (
+            stripe_client.v1.checkout.sessions.create
+        )
+        self.create_checkout_session.return_value = SimpleNamespace(
+            id=self.checkout_session_id,
+            url=self.checkout_url,
+        )
+
+
+@override_settings(PAYMENT_PROVIDER="stripe")
+class PaymentServiceTests(StripeCheckoutMixin, TestCase):
+    def setUp(self):
+        self.set_up_stripe_client()
         self.platform = Platform.objects.create(name="Steam")
 
         self.product = Product.objects.create(
@@ -31,7 +55,7 @@ class PaymentServiceTests(TestCase):
             platform=self.platform,
         )
 
-    def test_create_payment_for_order(self):
+    def test_create_payment_for_order_opens_stripe_checkout(self):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
@@ -54,10 +78,27 @@ class PaymentServiceTests(TestCase):
             payment.amount,
             Decimal("59.99"),
         )
-        self.assertEqual(payment.provider, "local")
+        self.assertEqual(payment.provider, "stripe")
+        self.assertEqual(payment.transaction_id, self.checkout_session_id)
+        self.assertEqual(payment.checkout_url, self.checkout_url)
+
+        params, options = self.create_checkout_session.call_args.args
+        self.assertEqual(params["mode"], "payment")
+        self.assertEqual(params["client_reference_id"], order.order_number)
         self.assertEqual(
-            payment.transaction_id,
-            f"local-pay-payment-{payment.pk}",
+            params["metadata"],
+            {
+                "order_number": order.order_number,
+                "local_payment_id": str(payment.pk),
+            },
+        )
+        self.assertEqual(
+            params["line_items"][0]["price_data"]["unit_amount"],
+            5999,
+        )
+        self.assertEqual(
+            options,
+            {"idempotency_key": f"payment-{payment.pk}"},
         )
 
     def test_provider_can_be_injected_without_patching_service_internals(self):
@@ -71,6 +112,7 @@ class PaymentServiceTests(TestCase):
         payment = create_payment(order, provider=provider)
 
         self.assertEqual(payment.provider, provider.name)
+        self.create_checkout_session.assert_not_called()
 
     def test_provider_failure_is_translated_and_rolls_back_payment(self):
         class FailingProvider:
@@ -96,6 +138,7 @@ class PaymentServiceTests(TestCase):
 
         self.assertNotIn("private provider detail", str(error.exception))
         self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.create_checkout_session.assert_not_called()
 
     def test_missing_total_is_rejected_without_creating_payment(self):
         order = Order.objects.create(product=self.product, email="legacy@test.com")
@@ -107,6 +150,7 @@ class PaymentServiceTests(TestCase):
             create_payment(order)
 
         self.assertFalse(Payment.objects.exists())
+        self.create_checkout_session.assert_not_called()
 
     def test_missing_product_is_rejected_without_creating_payment(self):
         order = Order.objects.create(
@@ -122,6 +166,7 @@ class PaymentServiceTests(TestCase):
             create_payment(order)
 
         self.assertFalse(Payment.objects.exists())
+        self.create_checkout_session.assert_not_called()
 
     def test_create_payment_for_cart_order(self):
         order = Order.objects.create(
@@ -135,10 +180,18 @@ class PaymentServiceTests(TestCase):
 
         self.assertEqual(payment.order, order)
         self.assertEqual(payment.amount, Decimal("59.99"))
+        self.assertEqual(payment.provider, "stripe")
+        self.assertEqual(payment.checkout_url, self.checkout_url)
+        self.create_checkout_session.assert_called_once()
 
 
-class ConcurrentPaymentServiceTests(TransactionTestCase):
+@override_settings(PAYMENT_PROVIDER="stripe")
+class ConcurrentPaymentServiceTests(
+    StripeCheckoutMixin,
+    TransactionTestCase,
+):
     def setUp(self):
+        self.set_up_stripe_client()
         self.platform = Platform.objects.create(name="Steam")
         self.product = Product.objects.create(
             title="Cyber Game",
@@ -172,6 +225,7 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
             order_queries,
         )
         self.assertFalse(Payment.objects.exists())
+        self.create_checkout_session.assert_not_called()
 
     def test_competing_attempts_create_only_one_active_payment(self):
         barrier = Barrier(2)
@@ -210,6 +264,7 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
             ],
             ["Payment already in progress"],
         )
+        self.create_checkout_session.assert_called_once()
 
     def test_retry_after_failed_payment(self):
         failed_payment = Payment.objects.create(
@@ -222,6 +277,9 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
 
         self.assertNotEqual(payment.pk, failed_payment.pk)
         self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertEqual(payment.provider, "stripe")
+        self.assertEqual(payment.transaction_id, self.checkout_session_id)
+        self.assertEqual(payment.checkout_url, self.checkout_url)
         self.assertEqual(
             Payment.objects.filter(
                 order=self.order,
@@ -232,6 +290,12 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
             ).count(),
             1,
         )
+        self.create_checkout_session.assert_called_once()
+        _, options = self.create_checkout_session.call_args.args
+        self.assertEqual(
+            options,
+            {"idempotency_key": f"payment-{payment.pk}"},
+        )
 
     def test_payment_amount_uses_order_total_after_catalogue_price_change(self):
         self.product.price = Decimal("89.99")
@@ -240,3 +304,8 @@ class ConcurrentPaymentServiceTests(TransactionTestCase):
         payment = create_payment(self.order)
 
         self.assertEqual(payment.amount, Decimal("59.99"))
+        params, _ = self.create_checkout_session.call_args.args
+        self.assertEqual(
+            params["line_items"][0]["price_data"]["unit_amount"],
+            5999,
+        )

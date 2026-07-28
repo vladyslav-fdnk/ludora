@@ -198,6 +198,12 @@ class MyOrderDetailSerializer(serializers.ModelSerializer):
 
 
 class PaymentSerializer(serializers.ModelSerializer):
+    checkout_url = serializers.CharField(
+        read_only=True,
+        allow_null=True,
+        default=None,
+    )
+
     class Meta:
         model = Payment
         fields = [
@@ -206,6 +212,7 @@ class PaymentSerializer(serializers.ModelSerializer):
             "status",
             "amount",
             "created_at",
+            "checkout_url",
         ]
 
         read_only_fields = [

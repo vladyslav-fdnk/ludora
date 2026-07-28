@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.exceptions import ImproperlyConfigured
@@ -18,6 +19,12 @@ from apps.payments.providers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CompletePaymentResult:
+    order: Order
+    already_completed: bool
 
 
 @transaction.atomic
@@ -125,6 +132,83 @@ def _fulfil_order(
     return license_keys
 
 
+@transaction.atomic
+def complete_payment(payment_id: int) -> CompletePaymentResult:
+    """Complete provider-neutral order fulfilment for a confirmed payment."""
+    payment_reference = Payment.objects.only("order_id").get(id=payment_id)
+    order = (
+        Order.objects.select_for_update(of=("self",))
+        .select_related("product")
+        .get(id=payment_reference.order_id)
+    )
+    payment = Payment.objects.select_for_update().get(
+        id=payment_id,
+        order=order,
+    )
+
+    if (
+        order.status == Order.Status.PAID
+        and payment.status == Payment.Status.PAID
+    ):
+        return CompletePaymentResult(
+            order=order,
+            already_completed=True,
+        )
+    if order.status == Order.Status.PAID:
+        raise OrderPaymentError("Order payment state is inconsistent")
+    if payment.status not in (Payment.Status.CREATED, Payment.Status.PENDING):
+        raise OrderPaymentError("Payment cannot be completed")
+
+    price_paid = payable_total(order)
+    if payment.amount != price_paid:
+        raise OrderPaymentError("Payment amount does not match order total")
+
+    order_items = get_or_create_order_items_for_fulfilment(
+        order,
+        legacy_unit_price=price_paid,
+    )
+    paid_at = timezone.now()
+    license_keys = _fulfil_order(order_items, paid_at=paid_at)
+    if order.source == Order.Source.DIRECT:
+        order.license_key = license_keys[0]
+    order.status = Order.Status.PAID
+    order.price_paid = price_paid
+    order.paid_at = paid_at
+    order.save(
+        update_fields=(
+            "license_key",
+            "status",
+            "price_paid",
+            "paid_at",
+            "updated_at",
+        )
+    )
+
+    payment.status = Payment.Status.PAID
+    payment.paid_at = paid_at
+    payment.save(update_fields=("status", "paid_at"))
+
+    committed_order_id = order.pk
+
+    def dispatch_confirmation_email(order_id=committed_order_id):
+        from apps.orders.tasks import send_order_confirmation_email
+
+        try:
+            send_order_confirmation_email.delay(order_id)
+        except OperationalError:
+            logger.exception(
+                "Order confirmation email could not be queued; order_id=%s",
+                order_id,
+                extra={"order_id": order_id},
+            )
+
+    transaction.on_commit(dispatch_confirmation_email)
+    return CompletePaymentResult(
+        order=order,
+        already_completed=False,
+    )
+
+
 def pay_order(
     order_id: int,
     *,
@@ -141,10 +225,6 @@ def pay_order(
         if order.status == Order.Status.PAID:
             raise OrderPaymentError("Already paid")
         price_paid = payable_total(order)
-        order_items = get_or_create_order_items_for_fulfilment(
-            order,
-            legacy_unit_price=price_paid,
-        )
         payment = (
             Payment.objects.select_for_update()
             .filter(
@@ -170,6 +250,7 @@ def pay_order(
                         amount=payment.amount,
                         order_number=order.order_number,
                         idempotency_key=f"payment-{payment.pk}",
+                        local_payment_id=payment.pk,
                     )
                 )
                 payment.provider = selected_provider.name
@@ -220,43 +301,7 @@ def pay_order(
         if provider_outcome_error:
             return_order = order
         else:
-            paid_at = timezone.now()
-            license_keys = _fulfil_order(order_items, paid_at=paid_at)
-            if order.source == Order.Source.DIRECT:
-                order.license_key = license_keys[0]
-            order.status = Order.Status.PAID
-            order.price_paid = price_paid
-            order.paid_at = paid_at
-            order.save(
-                update_fields=(
-                    "license_key",
-                    "status",
-                    "price_paid",
-                    "paid_at",
-                    "updated_at",
-                )
-            )
-
-            payment.status = Payment.Status.PAID
-            payment.paid_at = paid_at
-            payment.save(update_fields=("status", "paid_at"))
-
-            committed_order_id = order.pk
-
-            def dispatch_confirmation_email(order_id=committed_order_id):
-                from apps.orders.tasks import send_order_confirmation_email
-
-                try:
-                    send_order_confirmation_email.delay(order_id)
-                except OperationalError:
-                    logger.exception(
-                        "Order confirmation email could not be queued; order_id=%s",
-                        order_id,
-                        extra={"order_id": order_id},
-                    )
-
-            transaction.on_commit(dispatch_confirmation_email)
-            return_order = order
+            return_order = complete_payment(payment.id).order
 
     if provider_outcome_error:
         raise OrderPaymentError(provider_outcome_error)
