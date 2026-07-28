@@ -10,6 +10,7 @@ from django.urls import reverse
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import LicenseAssignment, Order, Payment
+from apps.orders.services import reserve_order_licenses
 from apps.payments.webhooks import (
     StripeCheckoutEventType,
     StripeCheckoutSession,
@@ -208,6 +209,7 @@ class StripeWebhookAPITests(TestCase):
         dispatch_email.assert_called_once_with(self.order.id)
 
     def test_completed_unpaid_session_does_not_fulfil_order(self):
+        reserve_order_licenses(self.order.id)
         payload = event_payload(
             "checkout.session.completed",
             payment_id=str(self.payment.id),
@@ -228,12 +230,13 @@ class StripeWebhookAPITests(TestCase):
         self.assertEqual(self.payment.status, Payment.Status.PENDING)
         self.assertEqual(
             self.license_key.status,
-            LicenseKey.Status.AVAILABLE,
+            LicenseKey.Status.RESERVED,
         )
-        self.assertFalse(LicenseAssignment.objects.exists())
+        self.assertTrue(LicenseAssignment.objects.exists())
         dispatch_email.assert_not_called()
 
     def test_async_payment_failed_marks_payment_failed(self):
+        reserve_order_licenses(self.order.id)
         payload = event_payload(
             "checkout.session.async_payment_failed",
             payment_id=str(self.payment.id),
@@ -249,6 +252,7 @@ class StripeWebhookAPITests(TestCase):
         self.assertFalse(LicenseAssignment.objects.exists())
 
     def test_expired_session_marks_payment_failed(self):
+        reserve_order_licenses(self.order.id)
         payload = event_payload(
             "checkout.session.expired",
             payment_id=str(self.payment.id),
@@ -258,10 +262,13 @@ class StripeWebhookAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.payment.refresh_from_db()
+        self.license_key.refresh_from_db()
         self.assertEqual(self.payment.status, Payment.Status.FAILED)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
         self.assertFalse(LicenseAssignment.objects.exists())
 
     def test_success_then_failure_keeps_payment_paid(self):
+        reserve_order_licenses(self.order.id)
         success = StripeWebhookResult(
             event_id="evt_success_first",
             event_type=StripeCheckoutEventType.COMPLETED,
@@ -287,6 +294,7 @@ class StripeWebhookAPITests(TestCase):
         self.assertEqual(self.payment.status, Payment.Status.PAID)
 
     def test_failure_then_success_marks_payment_paid(self):
+        reserve_order_licenses(self.order.id)
         failure = StripeWebhookResult(
             event_id="evt_failure_first",
             event_type=StripeCheckoutEventType.ASYNC_PAYMENT_FAILED,
@@ -316,6 +324,7 @@ class StripeWebhookAPITests(TestCase):
         self.assertEqual(self.payment.status, Payment.Status.PAID)
 
     def test_duplicate_failure_delivery_is_idempotent(self):
+        reserve_order_licenses(self.order.id)
         failure = StripeWebhookResult(
             event_id="evt_duplicate_failure",
             event_type=StripeCheckoutEventType.EXPIRED,

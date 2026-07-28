@@ -411,7 +411,7 @@ class OrderServiceTests(TestCase):
         dispatch_email.assert_not_called()
         return error.exception
 
-    def test_rejected_provider_marks_payment_failed_without_fulfilment(self):
+    def test_rejected_provider_marks_payment_failed_and_releases_reservation(self):
         order = Order.objects.create(
             product=self.product,
             email="buyer@test.invalid",
@@ -438,11 +438,12 @@ class OrderServiceTests(TestCase):
         self.assertEqual(payment.status, Payment.Status.FAILED)
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertIsNone(order.license_key)
-        self.assertEqual(self.license_key.status, LicenseKey.Status.RESERVED)
-        assignment = LicenseAssignment.objects.get(
-            license_key=self.license_key,
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertFalse(
+            LicenseAssignment.objects.filter(
+                license_key=self.license_key,
+            ).exists()
         )
-        self.assertEqual(assignment.order_item.order, order)
         self.assertIsNone(self.license_key.sold_at)
         dispatch_email.assert_not_called()
 

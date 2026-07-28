@@ -216,6 +216,22 @@ def release_order_license_reservation(
     return license_keys
 
 
+def fail_payment(*, order: Order, payment: Payment) -> Payment:
+    """Record a terminal payment failure and release its order reservation.
+
+    This internal helper does not own transaction boundaries. It must be called
+    within an existing transaction after the caller has acquired row locks for
+    both the Order and Payment.
+    """
+    if payment.status == Payment.Status.PAID:
+        return payment
+
+    payment.status = Payment.Status.FAILED
+    payment.save(update_fields=("status",))
+    release_order_license_reservation(order.id)
+    return payment
+
+
 def _fulfil_order(
     order_items: list[OrderItem],
     *,
@@ -535,11 +551,10 @@ def _pay_order(
 
     provider_outcome_error = None
     with transaction.atomic():
-        payment = Payment.objects.select_for_update().get(pk=payment.pk)
         order = Order.objects.select_for_update(of=("self",)).get(pk=order.pk)
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
         if provider_result.status is PaymentProviderStatus.FAILED:
-            payment.status = Payment.Status.FAILED
-            payment.save(update_fields=("status",))
+            payment = fail_payment(order=order, payment=payment)
             provider_outcome_error = "Payment was rejected"
         elif provider_result.status is not PaymentProviderStatus.SUCCEEDED:
             payment.status = Payment.Status.PENDING
