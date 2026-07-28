@@ -1,255 +1,260 @@
 # Ludora
 
-![Python](https://img.shields.io/badge/Python-3.13-3776AB?style=flat-square&logo=python&logoColor=white)
-![Django](https://img.shields.io/badge/Django-5.2-092E20?style=flat-square&logo=django&logoColor=white)
-![Django REST Framework](https://img.shields.io/badge/DRF-3.17-A30000?style=flat-square&logo=django&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat-square&logo=postgresql&logoColor=white)
-![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
-![Redis](https://img.shields.io/badge/Redis-8-DC382D?style=flat-square&logo=redis&logoColor=white)
-![Celery](https://img.shields.io/badge/Celery-5.5-37814A?style=flat-square&logo=celery&logoColor=white)
+Ludora is a digital-product marketplace built as a Django modular monolith with
+an aiogram Telegram client. It provides a public catalogue, JWT authentication,
+persistent carts, immutable order snapshots, license-key fulfilment, local
+payment simulation, Stripe Checkout, and signed Stripe webhooks.
 
-Backend-first digital marketplace built with Django REST Framework and aiogram, featuring JWT authentication, persistent carts, payment simulation, license fulfillment, and Telegram integration.
+## Stack
 
+- Python 3.13, Django 5.x, Django REST Framework
+- PostgreSQL 16
+- Celery with Redis 8
+- aiogram and HTTPX
+- Stripe Checkout
+- Docker Compose, uv, pytest, and Ruff
 
-Ludora is a backend-focused marketplace for digital products and license keys.
-It combines a Django REST API, an aiogram Telegram bot, Django Admin, PostgreSQL,
-Redis, and Celery in a Docker Compose development environment.
+## Architecture
 
-## Capabilities
+The Django backend is the system of record. PostgreSQL stores identities,
+catalogue data, carts, order snapshots, payment attempts, and license
+assignments. The Telegram bot is an API client and does not access the database.
+Celery handles post-commit order-confirmation email through Redis.
 
-- Searchable, filterable, and paginated product catalogue.
-- Email/password and Telegram authentication with JWT access and refresh tokens.
-- Persistent carts with server-calculated prices and atomic checkout.
-- Direct and multi-item orders with immutable purchase snapshots.
-- Owner-scoped order history and paid license-key access.
-- Transaction-safe license fulfilment using a deterministic local payment
-  simulation.
-- Telegram browsing, profiles, cart management, checkout, and order history in
-  English and Russian.
-- Staff catalogue and inventory management through Django Admin, including
-  atomic CSV license-key imports.
-- Background tasks through Celery and Redis.
+```text
+API clients ─┐
+             ├─> Django REST API ─> PostgreSQL
+Telegram ─> bot ┘          │
+                           └─> Redis ─> Celery worker ─> email backend
 
-The local payment provider is for development only; no production payment
-gateway is integrated. Telegram checkout runs the backend's local simulated
-payment command and then displays the updated paid order and license keys.
+Stripe Checkout ─> POST /api/payments/stripe/webhook/ ─> payment fulfilment
+```
 
-## Quick Start
+The backend is divided by domain:
 
-### Requirements
+```text
+backend/apps/
+├── authentication/   # registration, JWT, Telegram authentication
+├── users/            # custom email-based user
+├── games/            # catalogue and license inventory
+├── carts/            # mutable carts and atomic checkout
+├── orders/           # order snapshots, payments, fulfilment, email
+├── payments/         # local/Stripe providers and Stripe webhooks
+└── core/             # shared infrastructure and diagnostic tasks
+```
 
-- Docker
-- Docker Compose plugin
+See [Architecture](docs/ARCHITECTURE.md) for transaction boundaries, the domain
+model, and the payment and webhook state transitions.
 
-### Run with Docker Compose
+## Docker quick start
 
-1. Create the local environment file:
+Requirements: Docker with the Compose plugin.
+
+1. Create the environment file and replace the placeholder secrets:
 
    ```bash
    cp .env.example .env
    ```
 
-2. Set non-empty values for `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`,
-   `BOT_TOKEN`, and `BOT_INTERNAL_SECRET`.
+   Set at least `DJANGO_SECRET_KEY`, `POSTGRES_PASSWORD`,
+   `BOT_INTERNAL_SECRET`, and `BOT_TOKEN` if the bot will run.
 
-3. Build the images and start PostgreSQL:
+2. Build and start the infrastructure:
 
    ```bash
    docker compose build
-   docker compose up -d postgres
+   docker compose up -d postgres redis
    ```
 
-4. Apply database migrations:
+3. Apply migrations:
 
    ```bash
    docker compose run --rm backend uv run python manage.py migrate
    ```
 
-5. Start the application:
+4. Start the backend and worker:
 
    ```bash
-   docker compose up
+   docker compose up backend celery_worker
    ```
 
-6. Optionally create a Django Admin user in another terminal:
+   If `BOT_TOKEN` and `BOT_INTERNAL_SECRET` are configured, include the bot with
+   `docker compose up backend celery_worker bot` (or run `docker compose up`).
+
+5. Optionally create an administrator:
 
    ```bash
    docker compose exec backend uv run python manage.py createsuperuser
    ```
 
-The API is available at `http://localhost:8000/`. The Telegram bot starts long
-polling when its required environment variables are configured.
+Services:
 
-## Explore the Project
+| Service | Address or role |
+| --- | --- |
+| Backend | `http://localhost:8000/` |
+| Swagger UI | `http://localhost:8000/api/docs/` |
+| OpenAPI schema | `http://localhost:8000/api/schema/` |
+| Django Admin | `http://localhost:8000/admin/` |
+| PostgreSQL | host port `5433` (container port `5432`) |
+| Redis | internal broker; no host port is published |
+| Celery worker | consumes Redis tasks |
+| Telegram bot | long polling; no HTTP port |
 
-- Swagger UI: `http://localhost:8000/api/docs/`
-- OpenAPI schema: `http://localhost:8000/api/schema/`
-- Django Admin: `http://localhost:8000/admin/`
-- [Architecture](docs/ARCHITECTURE.md) — component boundaries, domain model,
-  payment and fulfilment rules, and design decisions.
-- [Changelog](CHANGELOG.md) — implemented changes and development milestones.
+The backend and worker entrypoint wait for PostgreSQL. Compose is a development
+topology, not a production deployment: it uses Django's development server,
+bind-mounts source, and does not include TLS or a reverse proxy.
 
-## API Overview
+To stop containers, run `docker compose down`. Add `--volumes` only when you
+intentionally want to delete the local PostgreSQL data volume.
 
-The OpenAPI schema is the complete request and response reference. The main
-endpoint groups are summarized below.
+## Local development without Docker
 
-### Authentication
+PostgreSQL is required for the backend; SQLite is not a supported substitute
+because the test suite and commerce services rely on PostgreSQL locking.
+Redis is required only for a real Celery worker. Django and the bot read the
+process environment directly; they do not load the repository `.env` file
+outside Compose. Export the variables from `.env` in your shell before running
+these commands.
 
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/register/` | Public | Register with email and password |
-| `POST` | `/api/auth/token/` | Public | Obtain JWT access and refresh tokens |
-| `POST` | `/api/auth/token/refresh/` | Refresh token | Obtain a new access token |
-| `GET` | `/api/auth/me/` | JWT | Retrieve the current user |
-| `POST` | `/api/auth/telegram/` | Internal secret | Synchronize a Telegram user and issue JWTs |
+```bash
+cd backend
+uv sync --frozen
+uv run python manage.py migrate
+uv run python manage.py runserver
+```
 
-Send access tokens to protected endpoints as:
+Use host-reachable database settings, for example
+`POSTGRES_HOST=localhost` and `POSTGRES_PORT=5433` when using the Compose
+database. In another terminal:
+
+```bash
+cd bot
+uv sync --frozen
+uv run python -m app.main
+```
+
+For a locally running backend, set
+`BOT_BACKEND_BASE_URL=http://localhost:8000`.
+
+## Configuration
+
+Copy `.env.example` to `.env`. Boolean values are case-sensitive and must be
+`True` or `False`. Do not commit real credentials.
+
+| Variable | Default in code/example | Purpose |
+| --- | --- | --- |
+| `DJANGO_SECRET_KEY` | insecure code fallback | Django signing and JWT key; set a strong value |
+| `DJANGO_DEBUG` | `False` | Enable Django debug mode |
+| `DJANGO_ALLOWED_HOSTS` | empty / local hosts in example | Comma-separated hosts |
+| `POSTGRES_DB` | `ludora_store` / `game_key_store` | Database name |
+| `POSTGRES_USER` | `ludora_store` / `game_key_store` | Database user |
+| `POSTGRES_PASSWORD` | empty / placeholder | Database password |
+| `POSTGRES_HOST` | `localhost` / `postgres` | Database host |
+| `POSTGRES_PORT` | `5432` | Database port inside the selected network |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0` | Redis broker URL; Compose overrides the host to `redis` |
+| `EMAIL_BACKEND` | console backend | Django email backend |
+| `EMAIL_HOST`, `EMAIL_PORT` | `localhost`, `25` | SMTP endpoint |
+| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | empty | Optional SMTP credentials |
+| `EMAIL_USE_TLS` | `False` | Enable SMTP TLS |
+| `EMAIL_TIMEOUT` | `10` | SMTP timeout in seconds |
+| `DEFAULT_FROM_EMAIL` | `Ludora <noreply@localhost>` | Sender address |
+| `PAYMENT_PROVIDER` | `local` | Provider for new payments: `local` or `stripe` |
+| `STRIPE_SECRET_KEY` | empty | Stripe API secret key |
+| `STRIPE_WEBHOOK_SECRET` | empty | Endpoint signing secret (`whsec_...`) |
+| `STRIPE_CURRENCY` | `usd` | Three-letter Stripe currency code |
+| `STRIPE_SUCCESS_URL` | empty | Checkout success redirect URL |
+| `STRIPE_CANCEL_URL` | empty | Checkout cancellation redirect URL |
+| `BOT_TOKEN` | empty | Telegram Bot API token |
+| `BOT_INTERNAL_SECRET` | empty | Shared secret for Telegram authentication |
+| `BOT_BACKEND_BASE_URL` | required / `http://backend:8000` in example | Backend base URL |
+| `BOT_API_TIMEOUT` | `5` | Backend request timeout in seconds |
+| `BOT_DEFAULT_LANGUAGE` | `en` | Default language: `en` or `ru` |
+
+All five Stripe variables are required when `PAYMENT_PROVIDER=stripe`.
+
+## Payments
+
+Orders begin in `CREATED`. Cart checkout or direct-order creation stores
+server-calculated item and total snapshots before payment.
+
+- `POST /api/orders/payments/` creates one active payment attempt for an owned
+  order. The local provider returns no checkout URL; Stripe returns a hosted
+  Checkout URL.
+- `POST /api/orders/<id>/pay/` is the synchronous confirmation command used by
+  the Telegram flow. It works with the local provider. Stripe intentionally has
+  no synchronous confirmation implementation; Stripe completion is webhook
+  driven.
+- On confirmed success, the service locks the order, payment, and available
+  keys; assigns one key per purchased unit; marks the payment and order paid;
+  and queues confirmation email after the database commit.
+
+For Stripe setup and local webhook forwarding, see
+[API and payment guide](docs/API.md#stripe-checkout-and-webhooks).
+
+## API
+
+The generated OpenAPI schema is the canonical request/response reference.
+[API documentation](docs/API.md) summarizes routes, authorization, errors,
+payment behavior, and example Stripe usage.
+
+Protected endpoints use:
 
 ```text
 Authorization: Bearer <access-token>
 ```
 
-The Telegram endpoint uses `X-Bot-Internal-Secret` and is intended only for the
-bot. Legacy `/api/auth/login/` and `/api/auth/refresh/` aliases remain available
-for the Telegram client.
+The Telegram authentication endpoint additionally requires
+`X-Bot-Internal-Secret`.
 
-### Products
+## Development workflow
 
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/products/` | Public | List active products |
-| `GET` | `/api/products/<id>/` | Public | Retrieve an active product |
-| `POST` | `/api/products/create/` | Staff | Create a product |
-| `PUT`, `PATCH` | `/api/products/<id>/update/` | Staff | Update a product |
-| `DELETE` | `/api/products/<id>/delete/` | Staff | Soft-delete a product |
-
-Product lists support platform, product type, and category filters; text search;
-ordering; and pagination.
-
-### Cart
-
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET` | `/api/cart/` | JWT | Retrieve or create the current user's cart |
-| `POST` | `/api/cart/items/` | JWT | Add a product or increase its quantity |
-| `PATCH` | `/api/cart/items/<id>/` | JWT | Change an item's quantity |
-| `DELETE` | `/api/cart/items/<id>/` | JWT | Remove an item |
-| `DELETE` | `/api/cart/clear/` | JWT | Clear the cart |
-| `POST` | `/api/cart/checkout/` | JWT | Create an order and clear the cart |
-
-### Orders and payments
-
-| Method | Endpoint | Access | Purpose |
-| --- | --- | --- | --- |
-| `GET`, `POST` | `/api/orders/` | JWT | List visible orders or create a direct order |
-| `GET` | `/api/orders/<id>/` | JWT | Retrieve a visible order |
-| `GET` | `/api/orders/my/` | JWT | List the current user's order summaries |
-| `GET` | `/api/orders/my/<id>/` | JWT | Retrieve an owned order and paid fulfilment details |
-| `POST` | `/api/orders/payments/` | JWT | Create a payment for an owned order |
-| `POST` | `/api/orders/<id>/pay/` | JWT | Run the local simulated payment flow |
-
-Regular users can access only their own orders. Staff users can access all
-orders. See the [architecture documentation](docs/ARCHITECTURE.md) for payment,
-concurrency, fulfilment, and data-exposure guarantees.
-
-## Telegram Bot
-
-The bot supports:
-
-- `/start` for Telegram authentication and synchronization.
-- `/catalogue` for catalogue browsing and product details.
-- `/profile` for the synchronized backend profile.
-- `/cart` for cart management and checkout.
-- `/orders` for personal order summaries and details.
-- English and Russian interface text.
-- Automatic access-token refresh with one retry.
-
-Tokens and language preferences are currently process-local and are lost when
-the bot restarts.
-
-## Development
-
-### Tests
+Keep the two uv lockfiles in sync with their respective `pyproject.toml`.
+Typical checks mirror CI:
 
 ```bash
-docker compose exec backend uv run pytest
-docker compose run --rm bot uv run pytest
+cd backend
+uv sync --frozen
+uv run ruff check .
+uv run python manage.py check
+uv run python manage.py makemigrations --check --dry-run
+uv run pytest
+
+cd ../bot
+uv sync --frozen
+uv run ruff check .
+uv run pytest
 ```
 
-To run tests without Docker, use `uv sync` followed by `uv run pytest` from each
-package directory.
-
-### Linting
+With running containers:
 
 ```bash
 docker compose exec backend uv run ruff check .
-docker compose run --rm bot uv run ruff check .
+docker compose exec backend uv run python manage.py check
+docker compose exec backend uv run python manage.py makemigrations --check --dry-run
+docker compose exec backend uv run pytest
+docker compose exec bot uv run ruff check .
+docker compose exec bot uv run pytest
 ```
 
-For local environments, run `uv run ruff check .` from both `backend/` and
-`bot/`.
+Use `docker compose run --rm <service> ...` instead when the service is not
+already running. Backend tests use eager Celery execution and mock Stripe's
+network transport, so Redis and real Stripe credentials are not required.
 
-### Celery
-
-Follow worker output with:
-
-```bash
-docker compose logs -f celery_worker
-```
-
-Send the diagnostic task from the backend container with:
-
-```bash
-docker compose exec backend uv run python manage.py shell -c \
-  "from apps.core.tasks import log_worker_probe; print(log_worker_probe.delay('manual-worker-probe').id)"
-```
-
-Redis is used as the Celery broker; task results are not stored. The local
-console email backend also writes eligible order-confirmation emails to worker
-output.
-
-## Configuration
-
-Copy `.env.example` to `.env`; never commit real secrets.
-
-| Variable | Purpose |
-| --- | --- |
-| `DJANGO_SECRET_KEY` | Django cryptographic signing key |
-| `DJANGO_DEBUG` | Django debug mode |
-| `DJANGO_ALLOWED_HOSTS` | Comma-separated allowed hosts |
-| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | PostgreSQL credentials |
-| `POSTGRES_HOST`, `POSTGRES_PORT` | PostgreSQL connection |
-| `CELERY_BROKER_URL` | Celery broker URL |
-| `EMAIL_BACKEND` | Django email backend |
-| `EMAIL_HOST`, `EMAIL_PORT` | SMTP server |
-| `EMAIL_HOST_USER`, `EMAIL_HOST_PASSWORD` | Optional SMTP credentials |
-| `EMAIL_USE_TLS`, `EMAIL_TIMEOUT` | SMTP transport settings |
-| `DEFAULT_FROM_EMAIL` | Transactional email sender |
-| `BOT_TOKEN` | Telegram Bot API token |
-| `BOT_INTERNAL_SECRET` | Shared secret for Telegram authentication |
-| `BOT_BACKEND_BASE_URL` | Backend URL used by the bot |
-| `BOT_API_TIMEOUT` | Backend request timeout |
-| `BOT_DEFAULT_LANGUAGE` | Default bot language (`en` or `ru`) |
-
-## Repository Layout
+## Repository layout
 
 ```text
 ludora/
-├── backend/                 # Django API, domain apps, admin, and Celery worker
-├── bot/                     # aiogram Telegram client
-├── docs/ARCHITECTURE.md     # Architecture and implementation decisions
-├── docker-compose.yml       # Local service topology
-├── .env.example             # Configuration template
-└── README.md
+├── backend/                    # Django API and Celery application
+├── bot/                        # aiogram client
+├── docs/
+│   ├── API.md                  # endpoint and payment integration guide
+│   ├── ARCHITECTURE.md         # architecture and lifecycle guarantees
+│   └── REPOSITORY_HYGIENE.md   # review findings and follow-up work
+├── docker/                     # reserved service-specific configuration
+├── docker-compose.yml          # local development topology
+├── .env.example               # configuration template
+└── .github/workflows/tests.yml # CI checks
 ```
 
-## Roadmap
-
-- Complete the Telegram payment-status and fulfilment flow.
-- Integrate a production payment provider.
-- Extend confirmation email to multi-item cart orders.
-- Move bot token and language storage to shared Redis-backed storage.
-
-The repository contains subsequent
-cart, fulfilment, admin, and order-history work.
+See [Repository hygiene](docs/REPOSITORY_HYGIENE.md) for the current static
+review, deliberate compatibility fields, and non-production limitations.

@@ -1,8 +1,7 @@
 # docker/nginx
 
-Reserved for a future reverse proxy in front of the Django backend
-(and, later, a web frontend), e.g. `nginx.conf`, TLS termination,
-static/media file serving.
+Reserved for a future reverse proxy in front of the Django backend, for
+example an `nginx.conf`, TLS termination, and static/media file serving.
 
-Not used yet — there is no `nginx` service in docker-compose.yml until
-the project needs to be exposed beyond local development.
+It is not used by `docker-compose.yml`. The current Compose file is a local
+development topology and exposes Django's development server directly.

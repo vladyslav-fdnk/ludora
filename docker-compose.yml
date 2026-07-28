@@ -62,4 +62,5 @@ services:
 volumes:
   postgres_data:
 
-# TODO: add an nginx service (see docker/nginx) once the project is deployed.
+# Development topology only. A production deployment still needs a reverse
+# proxy/TLS, a production application server, secret management, and backups.
