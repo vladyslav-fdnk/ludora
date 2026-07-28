@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import transaction
@@ -9,12 +10,23 @@ from kombu.exceptions import OperationalError
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
+from apps.orders.payment_services import create_payment
 from apps.orders.services import complete_payment, pay_order
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
+from apps.payments.webhooks import (
+    StripeCheckoutEventType,
+    StripeCheckoutSession,
+    StripeWebhookResult,
+    process_stripe_webhook,
+)
 
 
+@override_settings(PAYMENT_PROVIDER="stripe")
 class OrderServiceTests(TestCase):
+    checkout_session_id = "cs_test_order_service"
+    checkout_url = "https://checkout.stripe.com/c/pay/cs_test_order_service"
+
     def setUp(self):
         self.platform = Platform.objects.create(
             name="Steam",
@@ -33,7 +45,48 @@ class OrderServiceTests(TestCase):
             value="TEST-KEY-123",
         )
 
-    def test_pay_order_assigns_license_key(self):
+        stripe_client_patcher = patch(
+            "apps.payments.providers.stripe.StripeClient"
+        )
+        self.addCleanup(stripe_client_patcher.stop)
+        stripe_client = stripe_client_patcher.start().return_value
+        self.create_checkout_session = (
+            stripe_client.v1.checkout.sessions.create
+        )
+        self.create_checkout_session.return_value = SimpleNamespace(
+            id=self.checkout_session_id,
+            url=self.checkout_url,
+        )
+
+    def start_checkout(self, order):
+        payment = create_payment(order)
+        order.refresh_from_db()
+        self.license_key.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertEqual(payment.provider, "stripe")
+        self.assertEqual(payment.transaction_id, self.checkout_session_id)
+        self.assertEqual(payment.checkout_url, self.checkout_url)
+        self.assertEqual(order.status, Order.Status.CREATED)
+        self.assertIsNone(order.license_key)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertFalse(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
+        return payment
+
+    def complete_checkout(self, payment):
+        process_stripe_webhook(
+            StripeWebhookResult(
+                event_id=f"evt_test_order_service_{payment.id}",
+                event_type=StripeCheckoutEventType.COMPLETED,
+                checkout_session=StripeCheckoutSession(
+                    id=payment.transaction_id,
+                    local_payment_id=str(payment.id),
+                ),
+            )
+        )
+
+    def test_checkout_webhook_assigns_license_key(self):
 
         order = Order.objects.create(
             product=self.product,
@@ -47,7 +100,8 @@ class OrderServiceTests(TestCase):
             ) as dispatch_email,
             self.captureOnCommitCallbacks(execute=True),
         ):
-            pay_order(order.id)
+            payment = self.start_checkout(order)
+            self.complete_checkout(payment)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -153,7 +207,7 @@ class OrderServiceTests(TestCase):
             amount=Decimal("59.99"),
         )
 
-        pay_order(order.id)
+        pay_order(order.id, provider=LocalPaymentProvider())
 
         payment.refresh_from_db()
         self.assertEqual(Payment.objects.filter(order=order).count(), 1)
@@ -374,11 +428,12 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
+        payment = self.start_checkout(order)
         with patch(
             "apps.orders.tasks.send_order_confirmation_email.delay"
         ) as dispatch_email:
             with self.captureOnCommitCallbacks(execute=False) as callbacks:
-                pay_order(order.id)
+                self.complete_checkout(payment)
                 dispatch_email.assert_not_called()
 
             self.assertEqual(len(callbacks), 1)
@@ -392,12 +447,13 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
+        payment = self.start_checkout(order)
         with patch(
             "apps.orders.tasks.send_order_confirmation_email.delay"
         ) as dispatch_email:
             with self.assertRaisesMessage(RuntimeError, "force rollback"):
                 with transaction.atomic():
-                    pay_order(order.id)
+                    self.complete_checkout(payment)
                     raise RuntimeError("force rollback")
 
         dispatch_email.assert_not_called()
@@ -405,6 +461,8 @@ class OrderServiceTests(TestCase):
         self.license_key.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.CREATED)
 
     def test_broker_failure_after_commit_does_not_corrupt_completed_payment(self):
         order = Order.objects.create(
@@ -413,6 +471,7 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
+        payment = self.start_checkout(order)
         with (
             patch(
                 "apps.orders.tasks.send_order_confirmation_email.delay",
@@ -421,19 +480,15 @@ class OrderServiceTests(TestCase):
             self.assertLogs("apps.orders.services", level="ERROR") as logs,
             self.captureOnCommitCallbacks(execute=True),
         ):
-            paid_order = pay_order(order.id)
+            self.complete_checkout(payment)
 
-        paid_order.refresh_from_db()
+        order.refresh_from_db()
+        payment.refresh_from_db()
         self.license_key.refresh_from_db()
-        self.assertEqual(paid_order.status, Order.Status.PAID)
-        self.assertEqual(paid_order.license_key, self.license_key)
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertEqual(order.license_key, self.license_key)
         self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
-        self.assertTrue(
-            Payment.objects.filter(
-                order=paid_order,
-                status=Payment.Status.PAID,
-            ).exists()
-        )
+        self.assertEqual(payment.status, Payment.Status.PAID)
         log_output = "\n".join(logs.output)
         self.assertNotIn(self.license_key.value, log_output)
         self.assertNotIn(order.email, log_output)
@@ -446,17 +501,20 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
+        payment = create_payment(order)
         with (
             patch(
                 "apps.orders.tasks.send_order_confirmation_email.delay"
             ) as dispatch_email,
             self.assertRaisesMessage(OrderPaymentError, "No keys available"),
         ):
-            pay_order(order.id)
+            self.complete_checkout(payment)
 
         dispatch_email.assert_not_called()
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.CREATED)
 
-    def test_duplicate_completed_payment_does_not_schedule_another_email(self):
+    def test_duplicate_checkout_webhook_does_not_schedule_another_email(self):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
@@ -469,7 +527,8 @@ class OrderServiceTests(TestCase):
             ) as dispatch_email,
             self.captureOnCommitCallbacks(execute=True),
         ):
-            pay_order(order.id)
+            payment = self.start_checkout(order)
+            self.complete_checkout(payment)
         dispatch_email.assert_called_once_with(order.id)
         self.assertEqual(
             LicenseAssignment.objects.filter(
@@ -483,9 +542,8 @@ class OrderServiceTests(TestCase):
             patch(
                 "apps.orders.tasks.send_order_confirmation_email.delay"
             ) as duplicate_dispatch,
-            self.assertRaisesMessage(OrderPaymentError, "Already paid"),
         ):
-            pay_order(order.id)
+            self.complete_checkout(payment)
 
         duplicate_dispatch.assert_not_called()
         self.assertEqual(
@@ -511,7 +569,7 @@ class OrderServiceTests(TestCase):
             "Already paid",
         )
 
-    def test_pay_order_persists_completed_sale_fields(self):
+    def test_checkout_webhook_persists_completed_sale_fields(self):
         order = Order.objects.create(
             product=self.product,
             email="test@test.com",
@@ -523,13 +581,12 @@ class OrderServiceTests(TestCase):
             "apps.orders.services.timezone.now",
             return_value=paid_at,
         ):
-            pay_order(order.id)
+            payment = self.start_checkout(order)
+            self.complete_checkout(payment)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
-        payment = Payment.objects.get(
-            order=order,
-        )
+        payment.refresh_from_db()
 
         self.assertEqual(order.status, Order.Status.PAID)
         self.assertEqual(order.price_paid, Decimal("59.99"))
@@ -550,9 +607,10 @@ class OrderServiceTests(TestCase):
 
         self.product.price = Decimal("79.99")
         self.product.save(update_fields=("price",))
-        pay_order(order.id)
+        payment = self.start_checkout(order)
+        self.complete_checkout(payment)
         order.refresh_from_db()
-        payment = Payment.objects.get(order=order)
+        payment.refresh_from_db()
 
         self.assertEqual(order.price_paid, Decimal("59.99"))
         self.assertEqual(payment.amount, Decimal("59.99"))
@@ -568,7 +626,7 @@ class OrderServiceTests(TestCase):
             OrderPaymentError,
             "Order has no authoritative total and requires manual review",
         ):
-            pay_order(order.id)
+            create_payment(order)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -588,7 +646,7 @@ class OrderServiceTests(TestCase):
             OrderPaymentError,
             "Order has no product reference and requires manual review",
         ):
-            pay_order(order.id)
+            create_payment(order)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -604,15 +662,17 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
+        payment = create_payment(order)
         with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
-            pay_order(order.id)
+            self.complete_checkout(payment)
 
         order.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertIsNone(order.price_paid)
-        self.assertFalse(Payment.objects.exists())
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.CREATED)
 
-    def test_pay_order_fulfils_every_item_and_quantity(self):
+    def test_checkout_webhook_fulfils_every_item_and_quantity(self):
         second_product = Product.objects.create(
             title="The Witcher 3",
             slug="the-witcher-3",
@@ -651,7 +711,8 @@ class OrderServiceTests(TestCase):
             unit_price=Decimal("29.99"),
         )
 
-        pay_order(order.id)
+        payment = self.start_checkout(order)
+        self.complete_checkout(payment)
 
         order.refresh_from_db()
         assignments = LicenseAssignment.objects.filter(
@@ -672,8 +733,7 @@ class OrderServiceTests(TestCase):
             license_key.refresh_from_db()
             self.assertEqual(license_key.status, LicenseKey.Status.SOLD)
 
-        with self.assertRaisesMessage(OrderPaymentError, "Already paid"):
-            pay_order(order.id)
+        self.complete_checkout(payment)
 
         self.assertEqual(
             LicenseAssignment.objects.filter(order_item__order=order).count(),
@@ -709,8 +769,9 @@ class OrderServiceTests(TestCase):
             unit_price=Decimal("29.99"),
         )
 
+        payment = self.start_checkout(order)
         with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
-            pay_order(order.id)
+            self.complete_checkout(payment)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -719,4 +780,5 @@ class OrderServiceTests(TestCase):
         self.assertFalse(
             LicenseAssignment.objects.filter(order_item__order=order).exists()
         )
-        self.assertFalse(Payment.objects.filter(order=order).exists())
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.CREATED)
