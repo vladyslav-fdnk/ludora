@@ -435,6 +435,19 @@ def _pay_order(
         )
 
         if payment is None:
+            if provider is not None:
+                selected_provider = provider
+            else:
+                try:
+                    selected_provider = get_payment_provider()
+                except ImproperlyConfigured as exc:
+                    raise OrderPaymentError(
+                        "Payment provider configuration is invalid"
+                    ) from exc
+            if selected_provider.name == "stripe":
+                raise OrderPaymentError(
+                    "Stripe payments require checkout"
+                )
             payment = Payment.objects.create(
                 order=order,
                 status=Payment.Status.CREATED,
@@ -452,15 +465,16 @@ def _pay_order(
             )
 
         if not payment.transaction_id:
-            if provider is not None:
-                selected_provider = provider
-            else:
-                try:
-                    selected_provider = get_payment_provider()
-                except ImproperlyConfigured as exc:
-                    raise OrderPaymentError(
-                        "Payment provider configuration is invalid"
-                    ) from exc
+            if not created_payment:
+                if provider is not None:
+                    selected_provider = provider
+                else:
+                    try:
+                        selected_provider = get_payment_provider()
+                    except ImproperlyConfigured as exc:
+                        raise OrderPaymentError(
+                            "Payment provider configuration is invalid"
+                        ) from exc
         else:
             if not payment.provider:
                 raise OrderPaymentError(
