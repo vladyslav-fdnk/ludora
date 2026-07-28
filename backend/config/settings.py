@@ -9,13 +9,23 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv(
-    "DJANGO_SECRET_KEY",
-    "django-insecure-fallback-key",
-)
+DEFAULT_SECRET_KEY = "django-insecure-fallback-key"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", DEFAULT_SECRET_KEY)
 DEBUG = os.getenv("DJANGO_DEBUG", "False") == "True"
+
+if (
+    not DEBUG
+    and (not SECRET_KEY.strip() or SECRET_KEY == DEFAULT_SECRET_KEY)
+    and os.getenv("DJANGO_SETTINGS_MODULE") != "config.test_settings"
+):
+    raise ImproperlyConfigured(
+        "DJANGO_SECRET_KEY must be set to a non-default value in production."
+    )
+
 BOT_INTERNAL_SECRET = os.getenv("BOT_INTERNAL_SECRET", "")
 PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER", "local")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
