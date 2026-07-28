@@ -1,9 +1,10 @@
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 from kombu.exceptions import OperationalError
 
@@ -209,12 +210,40 @@ def complete_payment(payment_id: int) -> CompletePaymentResult:
     )
 
 
+@contextmanager
+def _pay_order_lock(order_id: int):
+    lock_name = f"orders.pay_order:{order_id}"
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+            [lock_name],
+        )
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                [lock_name],
+            )
+
+
 def pay_order(
     order_id: int,
     *,
     provider: PaymentProvider | None = None,
 ) -> Order:
-    provider_outcome_error = None
+    with _pay_order_lock(order_id):
+        return _pay_order(order_id, provider=provider)
+
+
+def _pay_order(
+    order_id: int,
+    *,
+    provider: PaymentProvider | None = None,
+) -> Order:
+    created_payment = False
+    created_provider_payment = False
     with transaction.atomic():
         order = (
             Order.objects.select_for_update(of=("self",))
@@ -241,54 +270,90 @@ def pay_order(
                 status=Payment.Status.CREATED,
                 amount=price_paid,
             )
+            created_payment = True
 
-        try:
-            if not payment.transaction_id:
-                selected_provider = provider or get_payment_provider()
-                provider_payment = selected_provider.create_payment(
-                    CreatePaymentRequest(
-                        amount=payment.amount,
-                        order_number=order.order_number,
-                        idempotency_key=f"payment-{payment.pk}",
-                        local_payment_id=payment.pk,
-                    )
-                )
-                payment.provider = selected_provider.name
-                payment.transaction_id = provider_payment.external_id
-                payment.save(update_fields=("provider", "transaction_id"))
+        if not payment.transaction_id:
+            if provider is not None:
+                selected_provider = provider
             else:
-                if not payment.provider:
+                try:
+                    selected_provider = get_payment_provider()
+                except ImproperlyConfigured as exc:
+                    raise OrderPaymentError(
+                        "Payment provider configuration is invalid"
+                    ) from exc
+        else:
+            if not payment.provider:
+                raise OrderPaymentError(
+                    "Payment provider configuration is invalid"
+                )
+            if provider is not None:
+                if provider.name != payment.provider:
                     raise OrderPaymentError(
                         "Payment provider configuration is invalid"
                     )
-                if provider is not None:
-                    if provider.name != payment.provider:
-                        raise OrderPaymentError(
-                            "Payment provider configuration is invalid"
-                        )
-                    selected_provider = provider
-                else:
-                    try:
-                        selected_provider = get_payment_provider(
-                            payment.provider
-                        )
-                    except ImproperlyConfigured as exc:
-                        raise OrderPaymentError(
-                            "Payment provider configuration is invalid"
-                        ) from exc
+                selected_provider = provider
+            else:
+                try:
+                    selected_provider = get_payment_provider(
+                        payment.provider
+                    )
+                except ImproperlyConfigured as exc:
+                    raise OrderPaymentError(
+                        "Payment provider configuration is invalid"
+                    ) from exc
 
-            provider_result = selected_provider.confirm_payment(
-                payment.transaction_id
+    try:
+        if not payment.transaction_id:
+            provider_payment = selected_provider.create_payment(
+                CreatePaymentRequest(
+                    amount=payment.amount,
+                    order_number=order.order_number,
+                    idempotency_key=f"payment-{payment.pk}",
+                    local_payment_id=payment.pk,
+                )
             )
-        except ImproperlyConfigured as exc:
-            raise OrderPaymentError(
-                "Payment provider configuration is invalid"
-            ) from exc
-        except PaymentProviderError as exc:
-            raise OrderPaymentError(
-                "Payment provider could not confirm payment"
-            ) from exc
+            created_provider_payment = True
+            with transaction.atomic():
+                payment = Payment.objects.select_for_update().get(pk=payment.pk)
+                payment.provider = selected_provider.name
+                payment.transaction_id = provider_payment.external_id
+                payment.save(update_fields=("provider", "transaction_id"))
 
+        provider_result = selected_provider.confirm_payment(
+            payment.transaction_id
+        )
+    except ImproperlyConfigured as exc:
+        raise OrderPaymentError(
+            "Payment provider configuration is invalid"
+        ) from exc
+    except PaymentProviderError as exc:
+        with transaction.atomic():
+            if created_payment:
+                Payment.objects.filter(pk=payment.pk).delete()
+            elif created_provider_payment:
+                Payment.objects.filter(pk=payment.pk).update(
+                    provider=None,
+                    transaction_id=None,
+                )
+        raise OrderPaymentError(
+            "Payment provider could not confirm payment"
+        ) from exc
+    except Exception:
+        with transaction.atomic():
+            if created_payment:
+                Payment.objects.filter(pk=payment.pk).delete()
+            elif created_provider_payment:
+                Payment.objects.filter(pk=payment.pk).update(
+                    provider=None,
+                    transaction_id=None,
+                )
+        raise
+
+    provider_outcome_error = None
+    with transaction.atomic():
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
+        order = Order.objects.select_for_update(of=("self",)).get(pk=order.pk)
         if provider_result.status is PaymentProviderStatus.FAILED:
             payment.status = Payment.Status.FAILED
             payment.save(update_fields=("status",))

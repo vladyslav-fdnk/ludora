@@ -1,9 +1,11 @@
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
+from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.db import transaction
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, transaction
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from kombu.exceptions import OperationalError
 
@@ -235,6 +237,22 @@ class OrderServiceTests(TestCase):
 
         payment.refresh_from_db()
         self.assertEqual(payment.status, Payment.Status.PAID)
+
+    @override_settings(PAYMENT_PROVIDER="unsupported-default")
+    def test_invalid_default_provider_uses_public_exception_contract(self):
+        order = Order.objects.create(
+            product=self.product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Payment provider configuration is invalid",
+        ):
+            pay_order(order.id)
+
+        self.assertFalse(Payment.objects.filter(order=order).exists())
 
     def test_matching_injected_provider_confirms_existing_transaction(self):
         class RecordingProvider:
@@ -783,3 +801,67 @@ class OrderServiceTests(TestCase):
         )
         payment.refresh_from_db()
         self.assertEqual(payment.status, Payment.Status.CREATED)
+
+
+class ConcurrentPayOrderTests(TransactionTestCase):
+    def test_calls_for_same_order_do_not_share_provisional_payment_state(self):
+        platform = Platform.objects.create(name="Steam")
+        product = Product.objects.create(
+            title="Cyber Game",
+            price=Decimal("59.99"),
+            platform=platform,
+        )
+        LicenseKey.objects.create(product=product, value="TEST-KEY-123")
+        order = Order.objects.create(
+            product=product,
+            email="buyer@test.invalid",
+            total_price=Decimal("59.99"),
+        )
+        start = Barrier(2)
+        concurrent_provider_call = Event()
+        call_lock = Lock()
+        provider = LocalPaymentProvider()
+        create_call_count = 0
+
+        class BlockingProvider:
+            name = provider.name
+
+            def create_payment(self, request):
+                nonlocal create_call_count
+                with call_lock:
+                    create_call_count += 1
+                    call_number = create_call_count
+                if call_number == 1:
+                    concurrent_provider_call.wait(timeout=1)
+                else:
+                    concurrent_provider_call.set()
+                return provider.create_payment(request)
+
+            def confirm_payment(self, external_id):
+                return provider.confirm_payment(external_id)
+
+        def attempt_payment():
+            close_old_connections()
+            try:
+                start.wait()
+                return pay_order(order.id, provider=BlockingProvider())
+            except OrderPaymentError as error:
+                return error
+            finally:
+                close_old_connections()
+
+        with (
+            patch("apps.orders.tasks.send_order_confirmation_email.delay"),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            results = list(executor.map(lambda _: attempt_payment(), range(2)))
+
+        order.refresh_from_db()
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(create_call_count, 1)
+        self.assertEqual(payment.status, Payment.Status.PAID)
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertEqual(
+            [str(result) for result in results if isinstance(result, Exception)],
+            ["Already paid"],
+        )

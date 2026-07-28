@@ -12,6 +12,7 @@ from apps.games.models import Platform, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import (
     Order,
+    OrderItem,
     Payment,
 )
 from apps.orders.payment_services import create_payment
@@ -138,6 +139,7 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
 
         self.assertNotIn("private provider detail", str(error.exception))
         self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.assertFalse(OrderItem.objects.filter(order=order).exists())
         self.create_checkout_session.assert_not_called()
 
     def test_missing_total_is_rejected_without_creating_payment(self):
@@ -226,6 +228,22 @@ class ConcurrentPaymentServiceTests(
         )
         self.assertFalse(Payment.objects.exists())
         self.create_checkout_session.assert_not_called()
+
+    def test_stripe_request_runs_outside_database_transaction(self):
+        transaction_states = []
+
+        def create_session(*args, **kwargs):
+            transaction_states.append(connection.in_atomic_block)
+            return SimpleNamespace(
+                id=self.checkout_session_id,
+                url=self.checkout_url,
+            )
+
+        self.create_checkout_session.side_effect = create_session
+
+        create_payment(self.order)
+
+        self.assertEqual(transaction_states, [False])
 
     def test_competing_attempts_create_only_one_active_payment(self):
         barrier = Barrier(2)
