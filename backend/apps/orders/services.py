@@ -94,6 +94,150 @@ def get_or_create_order_items_for_fulfilment(
     )
 
 
+def _locked_reservation_assignments(
+    order_items: list[OrderItem],
+) -> list[LicenseAssignment]:
+    assignments = list(
+        LicenseAssignment.objects.select_for_update()
+        .filter(order_item__in=order_items)
+        .order_by("order_item_id", "id")
+    )
+    if not assignments:
+        return []
+
+    license_keys = {
+        license_key.id: license_key
+        for license_key in LicenseKey.objects.select_for_update().filter(
+            id__in=[assignment.license_key_id for assignment in assignments]
+        )
+    }
+    assignment_counts = {order_item.id: 0 for order_item in order_items}
+    order_items_by_id = {order_item.id: order_item for order_item in order_items}
+
+    for assignment in assignments:
+        order_item = order_items_by_id.get(assignment.order_item_id)
+        license_key = license_keys.get(assignment.license_key_id)
+        if (
+            order_item is None
+            or license_key is None
+            or license_key.product_id != order_item.product_id
+            or license_key.status != LicenseKey.Status.RESERVED
+        ):
+            raise OrderPaymentError("Order reservation is inconsistent")
+        assignment_counts[order_item.id] += 1
+
+    if any(assignment_counts[order_item.id] != order_item.quantity for order_item in order_items):
+        raise OrderPaymentError("Order reservation is inconsistent")
+
+    return assignments
+
+
+@transaction.atomic
+def reserve_order_licenses(order_id: int) -> list[LicenseAssignment]:
+    """Establish or reuse the complete provider-neutral order reservation."""
+    order = Order.objects.select_for_update(of=("self",)).select_related("product").get(id=order_id)
+    if order.status == Order.Status.PAID:
+        raise OrderPaymentError("Paid orders cannot reserve licenses")
+
+    order_items = get_or_create_order_items_for_fulfilment(
+        order,
+        legacy_unit_price=payable_total(order),
+    )
+    order_items = list(
+        OrderItem.objects.select_for_update()
+        .select_related("product")
+        .filter(id__in=[order_item.id for order_item in order_items])
+        .order_by("product_id", "id")
+    )
+    if not order_items:
+        raise OrderPaymentError("Order has no product reference and requires manual review")
+
+    existing_assignments = _locked_reservation_assignments(order_items)
+    if existing_assignments:
+        return existing_assignments
+
+    assignments = []
+    license_keys = []
+    for order_item in order_items:
+        item_keys = list(
+            LicenseKey.objects.select_for_update(skip_locked=True)
+            .filter(
+                product_id=order_item.product_id,
+                status=LicenseKey.Status.AVAILABLE,
+            )
+            .exclude(id__in=LicenseAssignment.objects.values("license_key_id"))
+            .order_by("id")[: order_item.quantity]
+        )
+        if len(item_keys) != order_item.quantity:
+            raise OrderPaymentError("No keys available")
+        for license_key in item_keys:
+            license_key.status = LicenseKey.Status.RESERVED
+            assignments.append(
+                LicenseAssignment(
+                    order_item=order_item,
+                    license_key=license_key,
+                )
+            )
+        license_keys.extend(item_keys)
+
+    LicenseKey.objects.bulk_update(license_keys, ("status",))
+    return LicenseAssignment.objects.bulk_create(assignments)
+
+
+@transaction.atomic
+def release_order_license_reservation(
+    order_id: int,
+) -> list[LicenseKey]:
+    """Release one unpaid order's complete provider-neutral reservation."""
+    order = Order.objects.select_for_update(of=("self",)).get(id=order_id)
+    if order.status == Order.Status.PAID:
+        raise OrderPaymentError("Paid orders cannot release licenses")
+
+    order_items = list(
+        OrderItem.objects.select_for_update().filter(order=order).order_by("product_id", "id")
+    )
+    if not order_items:
+        return []
+
+    assignments = _locked_reservation_assignments(order_items)
+    if not assignments:
+        return []
+
+    license_keys = list(
+        LicenseKey.objects.select_for_update().filter(
+            id__in=[assignment.license_key_id for assignment in assignments]
+        )
+    )
+    for license_key in license_keys:
+        license_key.status = LicenseKey.Status.AVAILABLE
+
+    LicenseKey.objects.bulk_update(license_keys, ("status",))
+    LicenseAssignment.objects.filter(id__in=[assignment.id for assignment in assignments]).delete()
+    return license_keys
+
+
+def fail_payment(*, order: Order, payment: Payment) -> Payment:
+    """Record a terminal payment failure and release its order reservation.
+
+    This internal helper does not own transaction boundaries. It must be called
+    within an existing transaction after the caller has acquired row locks for
+    both the Order and Payment.
+    """
+    if payment.status == Payment.Status.PAID:
+        return payment
+
+    if order.status == Order.Status.PAID:
+        if payment.status != Payment.Status.FAILED:
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=("status",))
+        return payment
+
+    payment.status = Payment.Status.FAILED
+    payment.save(update_fields=("status",))
+    release_order_license_reservation(order.id)
+    return payment
+
+
 def _fulfil_order(
     order_items: list[OrderItem],
     *,
@@ -103,6 +247,27 @@ def _fulfil_order(
         raise OrderPaymentError(
             "Order has no product reference and requires manual review"
         )
+
+    reserved_assignments = _locked_reservation_assignments(order_items)
+    if reserved_assignments:
+        license_keys = list(
+            LicenseKey.objects.select_for_update()
+            .filter(
+                id__in=[
+                    assignment.license_key_id
+                    for assignment in reserved_assignments
+                ]
+            )
+            .order_by("id")
+        )
+        for license_key in license_keys:
+            license_key.status = LicenseKey.Status.SOLD
+            license_key.sold_at = paid_at
+        LicenseKey.objects.bulk_update(
+            license_keys,
+            ("status", "sold_at"),
+        )
+        return license_keys
 
     assignments = []
     license_keys = []
@@ -248,6 +413,7 @@ def _pay_order(
 ) -> Order:
     created_payment = False
     created_provider_payment = False
+    created_order_item_id = None
     with transaction.atomic():
         order = (
             Order.objects.select_for_update(of=("self",))
@@ -269,14 +435,6 @@ def _pay_order(
         )
 
         if payment is None:
-            payment = Payment.objects.create(
-                order=order,
-                status=Payment.Status.CREATED,
-                amount=price_paid,
-            )
-            created_payment = True
-
-        if not payment.transaction_id:
             if provider is not None:
                 selected_provider = provider
             else:
@@ -286,6 +444,37 @@ def _pay_order(
                     raise OrderPaymentError(
                         "Payment provider configuration is invalid"
                     ) from exc
+            if selected_provider.name == "stripe":
+                raise OrderPaymentError(
+                    "Stripe payments require checkout"
+                )
+            payment = Payment.objects.create(
+                order=order,
+                status=Payment.Status.CREATED,
+                amount=price_paid,
+            )
+            created_payment = True
+
+        had_order_items = order.items.exists()
+        reserve_order_licenses(order.id)
+        if not had_order_items:
+            created_order_item_id = (
+                OrderItem.objects.filter(order=order)
+                .values_list("id", flat=True)
+                .first()
+            )
+
+        if not payment.transaction_id:
+            if not created_payment:
+                if provider is not None:
+                    selected_provider = provider
+                else:
+                    try:
+                        selected_provider = get_payment_provider()
+                    except ImproperlyConfigured as exc:
+                        raise OrderPaymentError(
+                            "Payment provider configuration is invalid"
+                        ) from exc
         else:
             if not payment.provider:
                 raise OrderPaymentError(
@@ -307,8 +496,8 @@ def _pay_order(
                         "Payment provider configuration is invalid"
                     ) from exc
 
-    try:
-        if not payment.transaction_id:
+    if not payment.transaction_id:
+        try:
             provider_payment = selected_provider.create_payment(
                 CreatePaymentRequest(
                     amount=payment.amount,
@@ -323,7 +512,33 @@ def _pay_order(
                 payment.provider = selected_provider.name
                 payment.transaction_id = provider_payment.external_id
                 payment.save(update_fields=("provider", "transaction_id"))
+        except ImproperlyConfigured as exc:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise OrderPaymentError(
+                "Payment provider configuration is invalid"
+            ) from exc
+        except PaymentProviderError as exc:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise OrderPaymentError(
+                "Payment provider could not confirm payment"
+            ) from exc
+        except Exception:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise
 
+    try:
         provider_result = selected_provider.confirm_payment(
             payment.transaction_id
         )
@@ -356,11 +571,10 @@ def _pay_order(
 
     provider_outcome_error = None
     with transaction.atomic():
-        payment = Payment.objects.select_for_update().get(pk=payment.pk)
         order = Order.objects.select_for_update(of=("self",)).get(pk=order.pk)
+        payment = Payment.objects.select_for_update().get(pk=payment.pk)
         if provider_result.status is PaymentProviderStatus.FAILED:
-            payment.status = Payment.Status.FAILED
-            payment.save(update_fields=("status",))
+            payment = fail_payment(order=order, payment=payment)
             provider_outcome_error = "Payment was rejected"
         elif provider_result.status is not PaymentProviderStatus.SUCCEEDED:
             payment.status = Payment.Status.PENDING

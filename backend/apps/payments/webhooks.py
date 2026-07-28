@@ -6,8 +6,8 @@ from typing import Any, Mapping
 import stripe
 from django.db import transaction
 
-from apps.orders.models import Payment
-from apps.orders.services import complete_payment
+from apps.orders.models import Order, Payment
+from apps.orders.services import complete_payment, fail_payment
 from apps.payments.models import StripeWebhookEvent
 
 
@@ -68,10 +68,14 @@ def process_stripe_webhook(result: StripeWebhookResult) -> None:
         )
 
     try:
-        payment = Payment.objects.select_for_update().get(
-            id=int(local_payment_id)
+        order = Order.objects.select_for_update(of=("self",)).get(
+            payments__id=int(local_payment_id)
         )
-    except Payment.DoesNotExist as exc:
+        payment = Payment.objects.select_for_update().get(
+            id=int(local_payment_id),
+            order=order,
+        )
+    except (Order.DoesNotExist, Payment.DoesNotExist) as exc:
         raise InvalidStripeWebhook("Stripe payment does not exist") from exc
 
     if payment.provider != "stripe":
@@ -92,8 +96,7 @@ def process_stripe_webhook(result: StripeWebhookResult) -> None:
         return
 
     if payment.status != Payment.Status.PAID:
-        payment.status = Payment.Status.FAILED
-        payment.save(update_fields=("status",))
+        fail_payment(order=order, payment=payment)
 
 
 def parse_stripe_webhook(

@@ -7,7 +7,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.games.models import Platform, Product
+from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import Order, Payment
 
 User = get_user_model()
@@ -30,6 +30,10 @@ class PaymentCreateAPIViewTests(APITestCase):
             price=59.99,
             product_type="GAME",
             platform=self.platform,
+        )
+        LicenseKey.objects.create(
+            product=self.product,
+            value="PAYMENT-CREATE-API-KEY",
         )
         self.user = User.objects.create_user(
             email="user1@test.com",

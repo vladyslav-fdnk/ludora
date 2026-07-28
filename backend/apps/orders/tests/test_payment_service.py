@@ -8,9 +8,10 @@ from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 
-from apps.games.models import Platform, Product
+from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import (
+    LicenseAssignment,
     Order,
     OrderItem,
     Payment,
@@ -55,6 +56,10 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
             price=Decimal("59.99"),
             platform=self.platform,
         )
+        LicenseKey.objects.create(
+            product=self.product,
+            value="PAYMENT-SERVICE-KEY",
+        )
 
     def test_create_payment_for_order_opens_stripe_checkout(self):
         order = Order.objects.create(
@@ -82,6 +87,12 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
         self.assertEqual(payment.provider, "stripe")
         self.assertEqual(payment.transaction_id, self.checkout_session_id)
         self.assertEqual(payment.checkout_url, self.checkout_url)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(assignment.license_key.product, self.product)
+        self.assertEqual(
+            assignment.license_key.status,
+            LicenseKey.Status.RESERVED,
+        )
 
         params, options = self.create_checkout_session.call_args.args
         self.assertEqual(params["mode"], "payment")
@@ -113,6 +124,11 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
         payment = create_payment(order, provider=provider)
 
         self.assertEqual(payment.provider, provider.name)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(
+            assignment.license_key.status,
+            LicenseKey.Status.RESERVED,
+        )
         self.create_checkout_session.assert_not_called()
 
     def test_provider_failure_is_translated_and_rolls_back_payment(self):
@@ -140,6 +156,11 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
         self.assertNotIn("private provider detail", str(error.exception))
         self.assertFalse(Payment.objects.filter(order=order).exists())
         self.assertFalse(OrderItem.objects.filter(order=order).exists())
+        self.assertFalse(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
+        license_key = LicenseKey.objects.get(product=self.product)
+        self.assertEqual(license_key.status, LicenseKey.Status.AVAILABLE)
         self.create_checkout_session.assert_not_called()
 
     def test_missing_total_is_rejected_without_creating_payment(self):
@@ -177,6 +198,13 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
             source=Order.Source.CART,
             total_price=Decimal("59.99"),
         )
+        OrderItem.objects.create(
+            order=order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=1,
+            unit_price=Decimal("59.99"),
+        )
 
         payment = create_payment(order)
 
@@ -184,6 +212,12 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
         self.assertEqual(payment.amount, Decimal("59.99"))
         self.assertEqual(payment.provider, "stripe")
         self.assertEqual(payment.checkout_url, self.checkout_url)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(assignment.order_item.product, self.product)
+        self.assertEqual(
+            assignment.license_key.status,
+            LicenseKey.Status.RESERVED,
+        )
         self.create_checkout_session.assert_called_once()
 
 
@@ -199,6 +233,10 @@ class ConcurrentPaymentServiceTests(
             title="Cyber Game",
             price=Decimal("59.99"),
             platform=self.platform,
+        )
+        LicenseKey.objects.create(
+            product=self.product,
+            value="CONCURRENT-PAYMENT-SERVICE-KEY",
         )
         self.order = Order.objects.create(
             product=self.product,

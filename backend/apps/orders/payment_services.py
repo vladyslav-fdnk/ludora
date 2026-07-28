@@ -5,6 +5,8 @@ from apps.orders.models import Order, OrderItem, Payment
 from apps.orders.services import (
     get_or_create_order_items_for_fulfilment,
     payable_total,
+    release_order_license_reservation,
+    reserve_order_licenses,
 )
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import (
@@ -49,6 +51,7 @@ def create_payment(
             status=Payment.Status.CREATED,
             amount=amount,
         )
+        reserve_order_licenses(order.id)
 
     try:
         selected_provider = provider or get_payment_provider()
@@ -63,11 +66,13 @@ def create_payment(
     except PaymentProviderError as exc:
         with transaction.atomic():
             Payment.objects.filter(pk=payment.pk).delete()
+            release_order_license_reservation(order.id)
             OrderItem.objects.filter(pk=created_order_item_id).delete()
         raise OrderPaymentError("Payment provider could not create payment") from exc
     except Exception:
         with transaction.atomic():
             Payment.objects.filter(pk=payment.pk).delete()
+            release_order_license_reservation(order.id)
             OrderItem.objects.filter(pk=created_order_item_id).delete()
         raise
 

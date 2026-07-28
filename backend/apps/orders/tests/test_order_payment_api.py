@@ -9,8 +9,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from apps.games.models import LicenseKey, Platform, Product
-from apps.orders.exceptions import OrderPaymentError
-from apps.orders.models import LicenseAssignment, Order, Payment
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.payments.webhooks import (
     StripeCheckoutEventType,
     StripeCheckoutSession,
@@ -148,7 +147,7 @@ class OrderTests(APITestCase):
         self.assertEqual(assignment.order_item.order, order)
         self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
 
-    def test_checkout_completion_without_keys_fails_fulfilment(self):
+    def test_payment_creation_without_keys_fails_reservation(self):
         self.license_key.status = LicenseKey.Status.SOLD
         self.license_key.save()
         order = self.create_order()
@@ -156,15 +155,13 @@ class OrderTests(APITestCase):
 
         response = self.create_payment(order)
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        payment = Payment.objects.get(id=response.data["id"])
-        with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
-            self.complete_checkout(payment)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.data, {"error": "No keys available"})
 
         order.refresh_from_db()
-        payment.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
-        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.create_checkout_session.assert_not_called()
 
     def test_payment_for_already_paid_order_returns_400(self):
         order = self.create_order(status=Order.Status.PAID)
@@ -204,4 +201,53 @@ class OrderTests(APITestCase):
             status.HTTP_401_UNAUTHORIZED,
         )
         self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.create_checkout_session.assert_not_called()
+
+    def test_order_pay_rejects_stripe_before_any_side_effects(self):
+        order = self.create_order()
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            reverse("orders:order-pay", args=(order.id,)),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(
+            response.data,
+            {"error": "Stripe payments require checkout"},
+        )
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.assertFalse(OrderItem.objects.filter(order=order).exists())
+        self.assertFalse(
+            LicenseAssignment.objects.filter(
+                order_item__order=order,
+            ).exists()
+        )
+        self.license_key.refresh_from_db()
+        self.assertEqual(
+            self.license_key.status,
+            LicenseKey.Status.AVAILABLE,
+        )
+        self.create_checkout_session.assert_not_called()
+
+    @override_settings(PAYMENT_PROVIDER="local")
+    def test_order_pay_local_provider_flow_is_unchanged(self):
+        order = self.create_order()
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.post(
+            reverse("orders:order-pay", args=(order.id,)),
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        order.refresh_from_db()
+        payment = Payment.objects.get(order=order)
+        self.license_key.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertEqual(payment.provider, "local")
+        self.assertEqual(payment.status, Payment.Status.PAID)
+        self.assertEqual(
+            self.license_key.status,
+            LicenseKey.Status.SOLD,
+        )
         self.create_checkout_session.assert_not_called()
