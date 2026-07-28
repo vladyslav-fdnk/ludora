@@ -8,6 +8,7 @@ from django.db import transaction
 
 from apps.orders.models import Payment
 from apps.orders.services import complete_payment
+from apps.payments.models import StripeWebhookEvent
 
 
 class StripeCheckoutEventType(StrEnum):
@@ -45,6 +46,12 @@ class InvalidStripeWebhook(ValueError):
 @transaction.atomic
 def process_stripe_webhook(result: StripeWebhookResult) -> None:
     """Apply a parsed Stripe Checkout event to its local payment."""
+    _, created = StripeWebhookEvent.objects.get_or_create(
+        event_id=result.event_id
+    )
+    if not created:
+        return
+
     if not result.is_supported:
         return
 

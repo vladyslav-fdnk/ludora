@@ -12,7 +12,10 @@ from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.models import LicenseAssignment, Order, Payment
 from apps.payments.webhooks import (
     StripeCheckoutEventType,
+    StripeCheckoutSession,
+    StripeWebhookResult,
     parse_stripe_webhook,
+    process_stripe_webhook,
 )
 
 WEBHOOK_SECRET = "whsec_test_webhook"
@@ -157,6 +160,23 @@ class StripeWebhookAPITests(TestCase):
         )
         dispatch_email.assert_called_once_with(self.order.id)
         duplicate_email.assert_not_called()
+
+    def test_duplicate_event_does_not_execute_fulfilment_twice(self):
+        result = StripeWebhookResult(
+            event_id="evt_duplicate",
+            event_type=StripeCheckoutEventType.COMPLETED,
+            checkout_session=StripeCheckoutSession(
+                id=self.payment.transaction_id,
+                local_payment_id=str(self.payment.id),
+                payment_status="paid",
+            ),
+        )
+
+        with patch("apps.payments.webhooks.complete_payment") as fulfil:
+            process_stripe_webhook(result)
+            process_stripe_webhook(result)
+
+        fulfil.assert_called_once_with(self.payment.id)
 
     def test_completed_session_with_no_payment_required_fulfils_order(self):
         payload = event_payload(
