@@ -96,5 +96,13 @@ class LicenseKey(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     sold_at = models.DateTimeField(null=True, blank=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("product", "value"),
+                name="license_key_product_value_unique",
+            ),
+        ]
+
     def __str__(self) -> str:
         return f"{self.product.title} ({self.status})"
