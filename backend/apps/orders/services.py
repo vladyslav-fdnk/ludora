@@ -226,6 +226,12 @@ def fail_payment(*, order: Order, payment: Payment) -> Payment:
     if payment.status == Payment.Status.PAID:
         return payment
 
+    if order.status == Order.Status.PAID:
+        if payment.status != Payment.Status.FAILED:
+            payment.status = Payment.Status.FAILED
+            payment.save(update_fields=("status",))
+        return payment
+
     payment.status = Payment.Status.FAILED
     payment.save(update_fields=("status",))
     release_order_license_reservation(order.id)
