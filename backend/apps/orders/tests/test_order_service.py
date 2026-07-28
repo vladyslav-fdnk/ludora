@@ -75,10 +75,25 @@ class OrderServiceTests(TestCase):
         self.assertEqual(payment.checkout_url, self.checkout_url)
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertIsNone(order.license_key)
-        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
-        self.assertFalse(
-            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        assignments = list(
+            LicenseAssignment.objects.filter(order_item__order=order)
+            .select_related("order_item", "license_key")
+            .order_by("id")
         )
+        self.assertEqual(
+            len(assignments),
+            sum(order.items.values_list("quantity", flat=True)),
+        )
+        for assignment in assignments:
+            self.assertEqual(
+                assignment.license_key.product_id,
+                assignment.order_item.product_id,
+            )
+            self.assertEqual(
+                assignment.license_key.status,
+                LicenseKey.Status.RESERVED,
+            )
+            self.assertIsNone(assignment.license_key.sold_at)
         return payment
 
     def complete_checkout(self, payment):
@@ -109,6 +124,13 @@ class OrderServiceTests(TestCase):
             self.captureOnCommitCallbacks(execute=True),
         ):
             payment = self.start_checkout(order)
+            reserved_assignment = LicenseAssignment.objects.get(
+                order_item__order=order,
+            )
+            self.assertEqual(
+                reserved_assignment.license_key.status,
+                LicenseKey.Status.RESERVED,
+            )
             self.complete_checkout(payment)
 
         order.refresh_from_db()
@@ -126,6 +148,7 @@ class OrderServiceTests(TestCase):
         assignment = LicenseAssignment.objects.get(
             license_key=self.license_key,
         )
+        self.assertEqual(assignment.id, reserved_assignment.id)
         self.assertEqual(assignment.order_item.order, order)
         self.assertEqual(assignment.order_item.product, self.product)
 
@@ -415,7 +438,12 @@ class OrderServiceTests(TestCase):
         self.assertEqual(payment.status, Payment.Status.FAILED)
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertIsNone(order.license_key)
-        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.RESERVED)
+        assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
+        )
+        self.assertEqual(assignment.order_item.order, order)
+        self.assertIsNone(self.license_key.sold_at)
         dispatch_email.assert_not_called()
 
     def test_provider_exception_is_safe_and_rolls_back_local_state(self):
@@ -453,6 +481,9 @@ class OrderServiceTests(TestCase):
         )
 
         payment = self.start_checkout(order)
+        reserved_assignment = LicenseAssignment.objects.get(
+            order_item__order=order,
+        )
         with patch(
             "apps.orders.tasks.send_order_confirmation_email.delay"
         ) as dispatch_email:
@@ -463,6 +494,9 @@ class OrderServiceTests(TestCase):
             self.assertEqual(len(callbacks), 1)
             callbacks[0]()
             dispatch_email.assert_called_once_with(order.id)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(assignment.id, reserved_assignment.id)
+        self.assertEqual(assignment.license_key.status, LicenseKey.Status.SOLD)
 
     def test_rolled_back_payment_does_not_dispatch_email(self):
         order = Order.objects.create(
@@ -484,7 +518,12 @@ class OrderServiceTests(TestCase):
         order.refresh_from_db()
         self.license_key.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
-        self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
+        self.assertEqual(self.license_key.status, LicenseKey.Status.RESERVED)
+        assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
+        )
+        self.assertEqual(assignment.order_item.order, order)
+        self.assertIsNone(self.license_key.sold_at)
         payment.refresh_from_db()
         self.assertEqual(payment.status, Payment.Status.CREATED)
 
@@ -496,6 +535,9 @@ class OrderServiceTests(TestCase):
         )
 
         payment = self.start_checkout(order)
+        reserved_assignment = LicenseAssignment.objects.get(
+            order_item__order=order,
+        )
         with (
             patch(
                 "apps.orders.tasks.send_order_confirmation_email.delay",
@@ -513,6 +555,8 @@ class OrderServiceTests(TestCase):
         self.assertEqual(order.license_key, self.license_key)
         self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
         self.assertEqual(payment.status, Payment.Status.PAID)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(assignment.id, reserved_assignment.id)
         log_output = "\n".join(logs.output)
         self.assertNotIn(self.license_key.value, log_output)
         self.assertNotIn(order.email, log_output)
@@ -525,18 +569,20 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
-        payment = create_payment(order)
         with (
             patch(
                 "apps.orders.tasks.send_order_confirmation_email.delay"
             ) as dispatch_email,
             self.assertRaisesMessage(OrderPaymentError, "No keys available"),
         ):
-            self.complete_checkout(payment)
+            create_payment(order)
 
         dispatch_email.assert_not_called()
-        payment.refresh_from_db()
-        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.create_checkout_session.assert_not_called()
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.assertFalse(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
 
     def test_duplicate_checkout_webhook_does_not_schedule_another_email(self):
         order = Order.objects.create(
@@ -552,14 +598,15 @@ class OrderServiceTests(TestCase):
             self.captureOnCommitCallbacks(execute=True),
         ):
             payment = self.start_checkout(order)
+            reserved_assignment = LicenseAssignment.objects.get(
+                order_item__order=order,
+            )
             self.complete_checkout(payment)
         dispatch_email.assert_called_once_with(order.id)
-        self.assertEqual(
-            LicenseAssignment.objects.filter(
-                license_key=self.license_key,
-            ).count(),
-            1,
+        assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
         )
+        self.assertEqual(assignment.id, reserved_assignment.id)
         dispatch_email.reset_mock()
 
         with (
@@ -570,11 +617,13 @@ class OrderServiceTests(TestCase):
             self.complete_checkout(payment)
 
         duplicate_dispatch.assert_not_called()
+        duplicate_assignment = LicenseAssignment.objects.get(
+            license_key=self.license_key,
+        )
+        self.assertEqual(duplicate_assignment.id, reserved_assignment.id)
         self.assertEqual(
-            LicenseAssignment.objects.filter(
-                license_key=self.license_key,
-            ).count(),
-            1,
+            duplicate_assignment.license_key.status,
+            LicenseKey.Status.SOLD,
         )
 
     def test_cannot_pay_already_paid_order(self):
@@ -606,6 +655,10 @@ class OrderServiceTests(TestCase):
             return_value=paid_at,
         ):
             payment = self.start_checkout(order)
+            reserved_assignment = LicenseAssignment.objects.get(
+                order_item__order=order,
+            )
+            self.assertIsNone(reserved_assignment.license_key.sold_at)
             self.complete_checkout(payment)
 
         order.refresh_from_db()
@@ -618,6 +671,8 @@ class OrderServiceTests(TestCase):
         self.assertEqual(order.license_key, self.license_key)
         self.assertEqual(self.license_key.status, LicenseKey.Status.SOLD)
         self.assertEqual(self.license_key.sold_at, paid_at)
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
+        self.assertEqual(assignment.id, reserved_assignment.id)
         self.assertEqual(payment.status, Payment.Status.PAID)
         self.assertEqual(payment.amount, Decimal("59.99"))
         self.assertEqual(payment.paid_at, paid_at)
@@ -632,13 +687,19 @@ class OrderServiceTests(TestCase):
         self.product.price = Decimal("79.99")
         self.product.save(update_fields=("price",))
         payment = self.start_checkout(order)
+        reserved_assignment = LicenseAssignment.objects.get(
+            order_item__order=order,
+        )
         self.complete_checkout(payment)
         order.refresh_from_db()
         payment.refresh_from_db()
+        assignment = LicenseAssignment.objects.get(order_item__order=order)
 
         self.assertEqual(order.price_paid, Decimal("59.99"))
         self.assertEqual(payment.amount, Decimal("59.99"))
         self.assertEqual(order.product.price, Decimal("79.99"))
+        self.assertEqual(assignment.id, reserved_assignment.id)
+        self.assertEqual(assignment.license_key.status, LicenseKey.Status.SOLD)
 
     def test_legacy_order_without_total_is_rejected_explicitly(self):
         order = Order.objects.create(
@@ -686,15 +747,17 @@ class OrderServiceTests(TestCase):
             total_price=Decimal("59.99"),
         )
 
-        payment = create_payment(order)
         with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
-            self.complete_checkout(payment)
+            create_payment(order)
 
         order.refresh_from_db()
         self.assertEqual(order.status, Order.Status.CREATED)
         self.assertIsNone(order.price_paid)
-        payment.refresh_from_db()
-        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.assertFalse(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
+        self.create_checkout_session.assert_not_called()
 
     def test_checkout_webhook_fulfils_every_item_and_quantity(self):
         second_product = Product.objects.create(
@@ -736,22 +799,62 @@ class OrderServiceTests(TestCase):
         )
 
         payment = self.start_checkout(order)
-        self.complete_checkout(payment)
-
-        order.refresh_from_db()
-        assignments = LicenseAssignment.objects.filter(
-            order_item__order=order
+        reserved_assignments = list(
+            LicenseAssignment.objects.filter(order_item__order=order)
+            .select_related("license_key")
+            .order_by("id")
         )
-        self.assertEqual(order.status, Order.Status.PAID)
-        self.assertIsNone(order.license_key)
-        self.assertEqual(assignments.count(), 3)
+        reserved_assignment_ids = [
+            assignment.id for assignment in reserved_assignments
+        ]
+        reserved_key_ids = [
+            assignment.license_key_id for assignment in reserved_assignments
+        ]
+        self.assertEqual(len(reserved_assignments), 3)
         self.assertEqual(
-            assignments.filter(order_item=first_item).count(),
+            sum(
+                assignment.order_item_id == first_item.id
+                for assignment in reserved_assignments
+            ),
             2,
         )
         self.assertEqual(
-            assignments.filter(order_item=second_item).count(),
+            sum(
+                assignment.order_item_id == second_item.id
+                for assignment in reserved_assignments
+            ),
             1,
+        )
+        self.assertTrue(
+            all(
+                assignment.license_key.status
+                == LicenseKey.Status.RESERVED
+                for assignment in reserved_assignments
+            )
+        )
+        self.complete_checkout(payment)
+
+        order.refresh_from_db()
+        assignments = list(
+            LicenseAssignment.objects.filter(order_item__order=order)
+            .select_related("license_key")
+            .order_by("id")
+        )
+        self.assertEqual(order.status, Order.Status.PAID)
+        self.assertIsNone(order.license_key)
+        self.assertEqual(
+            [assignment.id for assignment in assignments],
+            reserved_assignment_ids,
+        )
+        self.assertEqual(
+            [assignment.license_key_id for assignment in assignments],
+            reserved_key_ids,
+        )
+        self.assertTrue(
+            all(
+                assignment.license_key.status == LicenseKey.Status.SOLD
+                for assignment in assignments
+            )
         )
         for license_key in [self.license_key, *extra_keys]:
             license_key.refresh_from_db()
@@ -760,8 +863,12 @@ class OrderServiceTests(TestCase):
         self.complete_checkout(payment)
 
         self.assertEqual(
-            LicenseAssignment.objects.filter(order_item__order=order).count(),
-            3,
+            list(
+                LicenseAssignment.objects.filter(order_item__order=order)
+                .order_by("id")
+                .values_list("id", flat=True)
+            ),
+            reserved_assignment_ids,
         )
 
     def test_insufficient_keys_for_one_item_rolls_back_all_fulfilment(self):
@@ -793,9 +900,8 @@ class OrderServiceTests(TestCase):
             unit_price=Decimal("29.99"),
         )
 
-        payment = self.start_checkout(order)
         with self.assertRaisesMessage(OrderPaymentError, "No keys available"):
-            self.complete_checkout(payment)
+            create_payment(order)
 
         order.refresh_from_db()
         self.license_key.refresh_from_db()
@@ -804,8 +910,8 @@ class OrderServiceTests(TestCase):
         self.assertFalse(
             LicenseAssignment.objects.filter(order_item__order=order).exists()
         )
-        payment.refresh_from_db()
-        self.assertEqual(payment.status, Payment.Status.CREATED)
+        self.assertFalse(Payment.objects.filter(order=order).exists())
+        self.create_checkout_session.assert_not_called()
 
 
 class LicenseReservationTests(TestCase):

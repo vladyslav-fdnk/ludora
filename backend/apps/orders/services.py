@@ -226,6 +226,27 @@ def _fulfil_order(
             "Order has no product reference and requires manual review"
         )
 
+    reserved_assignments = _locked_reservation_assignments(order_items)
+    if reserved_assignments:
+        license_keys = list(
+            LicenseKey.objects.select_for_update()
+            .filter(
+                id__in=[
+                    assignment.license_key_id
+                    for assignment in reserved_assignments
+                ]
+            )
+            .order_by("id")
+        )
+        for license_key in license_keys:
+            license_key.status = LicenseKey.Status.SOLD
+            license_key.sold_at = paid_at
+        LicenseKey.objects.bulk_update(
+            license_keys,
+            ("status", "sold_at"),
+        )
+        return license_keys
+
     assignments = []
     license_keys = []
     for order_item in order_items:
@@ -370,6 +391,7 @@ def _pay_order(
 ) -> Order:
     created_payment = False
     created_provider_payment = False
+    created_order_item_id = None
     with transaction.atomic():
         order = (
             Order.objects.select_for_update(of=("self",))
@@ -397,6 +419,15 @@ def _pay_order(
                 amount=price_paid,
             )
             created_payment = True
+
+        had_order_items = order.items.exists()
+        reserve_order_licenses(order.id)
+        if not had_order_items:
+            created_order_item_id = (
+                OrderItem.objects.filter(order=order)
+                .values_list("id", flat=True)
+                .first()
+            )
 
         if not payment.transaction_id:
             if provider is not None:
@@ -429,8 +460,8 @@ def _pay_order(
                         "Payment provider configuration is invalid"
                     ) from exc
 
-    try:
-        if not payment.transaction_id:
+    if not payment.transaction_id:
+        try:
             provider_payment = selected_provider.create_payment(
                 CreatePaymentRequest(
                     amount=payment.amount,
@@ -445,7 +476,33 @@ def _pay_order(
                 payment.provider = selected_provider.name
                 payment.transaction_id = provider_payment.external_id
                 payment.save(update_fields=("provider", "transaction_id"))
+        except ImproperlyConfigured as exc:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise OrderPaymentError(
+                "Payment provider configuration is invalid"
+            ) from exc
+        except PaymentProviderError as exc:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise OrderPaymentError(
+                "Payment provider could not confirm payment"
+            ) from exc
+        except Exception:
+            with transaction.atomic():
+                if created_payment:
+                    Payment.objects.filter(pk=payment.pk).delete()
+                release_order_license_reservation(order.id)
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            raise
 
+    try:
         provider_result = selected_provider.confirm_payment(
             payment.transaction_id
         )
