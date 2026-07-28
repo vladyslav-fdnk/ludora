@@ -261,6 +261,77 @@ class StripeWebhookAPITests(TestCase):
         self.assertEqual(self.payment.status, Payment.Status.FAILED)
         self.assertFalse(LicenseAssignment.objects.exists())
 
+    def test_success_then_failure_keeps_payment_paid(self):
+        success = StripeWebhookResult(
+            event_id="evt_success_first",
+            event_type=StripeCheckoutEventType.COMPLETED,
+            checkout_session=StripeCheckoutSession(
+                id=self.payment.transaction_id,
+                local_payment_id=str(self.payment.id),
+                payment_status="paid",
+            ),
+        )
+        failure = StripeWebhookResult(
+            event_id="evt_failure_second",
+            event_type=StripeCheckoutEventType.EXPIRED,
+            checkout_session=success.checkout_session,
+        )
+
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ):
+            process_stripe_webhook(success)
+        process_stripe_webhook(failure)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.PAID)
+
+    def test_failure_then_success_marks_payment_paid(self):
+        failure = StripeWebhookResult(
+            event_id="evt_failure_first",
+            event_type=StripeCheckoutEventType.ASYNC_PAYMENT_FAILED,
+            checkout_session=StripeCheckoutSession(
+                id=self.payment.transaction_id,
+                local_payment_id=str(self.payment.id),
+                payment_status="unpaid",
+            ),
+        )
+        success = StripeWebhookResult(
+            event_id="evt_success_second",
+            event_type=StripeCheckoutEventType.ASYNC_PAYMENT_SUCCEEDED,
+            checkout_session=StripeCheckoutSession(
+                id=self.payment.transaction_id,
+                local_payment_id=str(self.payment.id),
+                payment_status="paid",
+            ),
+        )
+
+        process_stripe_webhook(failure)
+        with patch(
+            "apps.orders.tasks.send_order_confirmation_email.delay"
+        ):
+            process_stripe_webhook(success)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.PAID)
+
+    def test_duplicate_failure_delivery_is_idempotent(self):
+        failure = StripeWebhookResult(
+            event_id="evt_duplicate_failure",
+            event_type=StripeCheckoutEventType.EXPIRED,
+            checkout_session=StripeCheckoutSession(
+                id=self.payment.transaction_id,
+                local_payment_id=str(self.payment.id),
+                payment_status="unpaid",
+            ),
+        )
+
+        process_stripe_webhook(failure)
+        process_stripe_webhook(failure)
+
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.status, Payment.Status.FAILED)
+
     def test_rejects_missing_payment(self):
         payload = event_payload(
             "checkout.session.completed",

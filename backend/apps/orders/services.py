@@ -157,7 +157,11 @@ def complete_payment(payment_id: int) -> CompletePaymentResult:
         )
     if order.status == Order.Status.PAID:
         raise OrderPaymentError("Order payment state is inconsistent")
-    if payment.status not in (Payment.Status.CREATED, Payment.Status.PENDING):
+    if payment.status not in (
+        Payment.Status.CREATED,
+        Payment.Status.PENDING,
+        Payment.Status.FAILED,
+    ):
         raise OrderPaymentError("Payment cannot be completed")
 
     price_paid = payable_total(order)
