@@ -7,6 +7,13 @@ by ADR-001. The work should preserve the existing order, payment, and
 fulfilment boundaries while ensuring that a chargeable checkout is never
 exposed before the complete order inventory is durably reserved.
 
+`Order.reservation_payment_attempt` identifies the only payment authorized to
+finalize or release the temporary reservation. Every reservation mutation must
+lock the order and verify that authority before changing assignments or keys.
+The authority is null if and only if no temporary reservation exists, always
+belongs to the same order, and is assigned or cleared atomically with the
+corresponding complete reservation transition.
+
 The phases below are ordered so that each commit establishes the behavior
 required by the next one. Each phase should be reviewed and verified before
 work proceeds.
@@ -34,6 +41,8 @@ wired into checkout or provider events.
 
 ### Files expected to change
 
+- `backend/apps/orders/models.py`
+- `backend/apps/orders/migrations/`
 - `backend/apps/orders/services.py`
 - `backend/apps/orders/tests/test_order_service.py`
 
@@ -49,6 +58,10 @@ wired into checkout or provider events.
 - Release returns only that unpaid order's reserved keys to availability and
   removes only its temporary assignments.
 - Sold keys and paid orders cannot be released.
+- The schema adds the nullable reservation-authority reference from `Order` to
+  its current `Payment` attempt.
+- A database partial unique constraint permits at most one `CREATED` or
+  `PENDING` payment per order.
 
 ### Exit criteria
 
@@ -81,9 +94,10 @@ checkout. This follows Phase 1 because provider integration must invoke an
 already-defined domain transition rather than own inventory behavior.
 
 Reservation and establishment or reuse of the single active payment must remain
-serialized for the order. Provider calls should retain their existing
-transaction boundary, and a provider-creation failure must leave neither a
-usable checkout nor a stranded reservation.
+serialized for the order. In one local transaction, the active payment is
+created or reused, set as `reservation_payment_attempt`, and associated with the
+complete reservation. Provider checkout creation then runs outside the database
+transaction as an explicit saga step.
 
 ### Entry criteria
 
@@ -106,8 +120,13 @@ usable checkout nor a stranded reservation.
 - Repeated or concurrent checkout requests reuse the order's reservation and
   do not establish duplicate active payment attempts.
 - A pending payment retains the complete reservation.
-- Failure to create a provider checkout makes the attempt inactive or removes
-  the incomplete attempt, releases the reservation, and exposes no checkout.
+- A definitive provider rejection proving that no checkout can charge makes the
+  attempt inactive, verifies its authority, releases the reservation, and
+  clears authority atomically.
+- A timeout, lost response, or uncertain provider-creation result retains the
+  attempt, its authority, and its reservation until retry with the same
+  idempotency key or reconciliation proves a conclusive outcome.
+- An ambiguous provider outcome cannot authorize a replacement payment.
 - Existing provider calls remain outside database transactions.
 - Direct and cart orders follow the same reservation rule.
 
@@ -115,16 +134,16 @@ usable checkout nor a stranded reservation.
 
 - Both local immediate-payment and asynchronous checkout paths enter
   finalization with a complete reservation.
-- Checkout-establishment failures leave no usable checkout or stranded
-  reservation.
+- Definitive checkout-establishment failures leave no usable checkout or
+  stranded reservation; ambiguous outcomes remain reserved and recoverable.
 - The acceptance criteria pass without provider calls being moved inside
   database transactions.
 
 ### Reviewer Notes
 
 Pay particular attention to order-level serialization, provider-call
-transaction boundaries, active-payment reuse, and cleanup when checkout
-establishment fails.
+transaction boundaries, active-payment reuse, stable provider idempotency keys,
+and the distinction between definitive failure and ambiguous provider state.
 
 ### Expected commit title
 
@@ -163,9 +182,15 @@ notification behavior should remain intact.
 ### Acceptance criteria
 
 - Successful finalization changes every assigned reserved key to sold.
+- Successful finalization first verifies that
+  `Order.reservation_payment_attempt` is the successful payment.
+- A historical payment success cannot finalize a reservation authorized to a
+  newer payment attempt and instead enters reconciliation/refund handling.
 - Existing assignments are retained as the permanent fulfilment record.
 - Finalization allocates no new key and creates no replacement assignment.
 - The order and successful payment become paid in the same atomic transition.
+- Reservation authority is cleared in that same atomic transition because the
+  assignments become permanent fulfilment records.
 - The paid amount continues to match the authoritative order total.
 - Repeating successful finalization is a no-op and does not send duplicate
   confirmation work.
@@ -224,8 +249,14 @@ provider webhook outcomes are intentionally deferred to Phase 5.
 ### Acceptance criteria
 
 - A conclusively failed synchronous payment releases the entire reservation.
+- Release first verifies that `Order.reservation_payment_attempt` is the
+  unsuccessful payment.
 - A pending outcome does not release inventory.
 - Release is atomic and idempotent.
+- Assignment removal, key release, payment transition, and authority clearing
+  commit atomically.
+- A historical failure, cancellation, or expiration cannot release a newer
+  attempt's reservation.
 - Release never changes sold keys or removes permanent fulfilment assignments.
 - After conclusive release, the unpaid order can begin a later attempt with a
   new complete reservation.
@@ -260,8 +291,9 @@ comes after both success and release transitions exist, allowing webhook code
 to coordinate provider events without duplicating domain behavior.
 
 Supported success, failure, and expiration events should be interpreted against
-durable local state. Duplicate delivery and conflicting event order must retain
-the ADR's rule that verified success takes precedence over release.
+durable local state and the current reservation authority. Duplicate delivery
+and conflicting event order must never allow a historical payment to mutate a
+newer attempt's reservation.
 
 ### Entry criteria
 
@@ -276,14 +308,19 @@ the ADR's rule that verified success takes precedence over release.
 
 ### Acceptance criteria
 
-- Verified successful events finalize the existing reservation.
+- Verified successful events finalize the existing reservation only when the
+  event's payment is its current authority.
 - Failed and expired events release the reservation only when the checkout can
   no longer succeed.
 - Pending or unpaid non-terminal events retain the reservation.
 - Duplicate events are idempotent at both event and domain levels.
 - A late failure or expiration cannot undo a completed sale.
-- Conflicting terminal events are serialized for the order, with verified
-  success taking precedence.
+- Delayed historical success cannot finalize a newer payment's reservation and
+  instead enters reconciliation/refund handling.
+- Historical failure, cancellation, and expiration cannot release a newer
+  payment's reservation.
+- Conflicting events are serialized for the order and resolved using both
+  durable payment state and reservation authority.
 - Invalid or unrelated events cannot affect reservations.
 
 ### Exit criteria
@@ -340,10 +377,16 @@ depend on checkout, success, release, and webhook behavior all being present.
 - Concurrency coverage proves that competing orders cannot reserve the same key.
 - Concurrent requests for one order produce one reservation and at most one
   active payment attempt.
+- The database partial unique constraint rejects concurrent creation of a
+  second active payment even if application serialization regresses.
 - Rollback coverage proves that no partial reservation, sale, or release is
   committed.
 - Retry coverage proves reservation, success, and release idempotency.
 - Out-of-order webhook coverage proves that successful payment cannot be undone.
+- Out-of-order coverage proves that historical success and failure cannot
+  mutate a newer attempt's reservation.
+- Provider saga coverage includes definitive rejection, timeouts, lost
+  responses, stable-idempotency retry, and reconciliation after interruption.
 - The complete existing test suite passes without changing unrelated behavior.
 
 ### Exit criteria
@@ -374,8 +417,6 @@ High
 The following architectural safeguards are intentionally postponed because
 they are not prerequisites for the first implementation of ADR-001:
 
-- add a database partial unique constraint enforcing at most one active payment
-  per order;
 - add database constraints for further `LicenseKey` lifecycle consistency,
   including relationships between status and lifecycle timestamps;
 - add database-level consistency protections where assignment state and key

@@ -216,26 +216,47 @@ def release_order_license_reservation(
     return license_keys
 
 
-def fail_payment(*, order: Order, payment: Payment) -> Payment:
-    """Record a terminal payment failure and release its order reservation.
+def terminate_payment(
+    *,
+    order: Order,
+    payment: Payment,
+    status: Payment.Status,
+) -> Payment:
+    """Record an unsuccessful terminal state and release the reservation.
 
     This internal helper does not own transaction boundaries. It must be called
     within an existing transaction after the caller has acquired row locks for
     both the Order and Payment.
     """
+    if status not in (
+        Payment.Status.FAILED,
+        Payment.Status.CANCELLED,
+        Payment.Status.EXPIRED,
+    ):
+        raise ValueError("Payment status is not terminal")
+
     if payment.status == Payment.Status.PAID:
         return payment
 
     if order.status == Order.Status.PAID:
-        if payment.status != Payment.Status.FAILED:
-            payment.status = Payment.Status.FAILED
+        if payment.status != status:
+            payment.status = status
             payment.save(update_fields=("status",))
         return payment
 
-    payment.status = Payment.Status.FAILED
-    payment.save(update_fields=("status",))
+    if payment.status != status:
+        payment.status = status
+        payment.save(update_fields=("status",))
     release_order_license_reservation(order.id)
     return payment
+
+
+def fail_payment(*, order: Order, payment: Payment) -> Payment:
+    return terminate_payment(
+        order=order,
+        payment=payment,
+        status=Payment.Status.FAILED,
+    )
 
 
 def _fulfil_order(

@@ -87,6 +87,14 @@ class Order(models.Model):
         blank=True,
     )
 
+    reservation_payment_attempt = models.ForeignKey(
+        "Payment",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="authorized_reservations",
+    )
+
     class Meta:
         constraints = [
             models.CheckConstraint(
@@ -174,6 +182,8 @@ class Payment(models.Model):
         PENDING = "PENDING", "Pending"
         PAID = "PAID", "Paid"
         FAILED = "FAILED", "Failed"
+        CANCELLED = "CANCELLED", "Cancelled"
+        EXPIRED = "EXPIRED", "Expired"
 
     order = models.ForeignKey(
         Order,
@@ -219,6 +229,13 @@ class Payment(models.Model):
             models.CheckConstraint(
                 condition=models.Q(amount__gte=0),
                 name="payment_amount_nonnegative",
+            ),
+            models.UniqueConstraint(
+                fields=("order",),
+                condition=models.Q(
+                    status__in=("CREATED", "PENDING"),
+                ),
+                name="unique_active_payment_per_order",
             ),
         ]
 
