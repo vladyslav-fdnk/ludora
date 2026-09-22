@@ -443,11 +443,18 @@ They must preserve the ownership and lifecycle decisions in ADR-001.
 
 ## Completion Checklist
 
-- [ ] Phase 1 completed
-- [ ] Phase 2 completed
-- [ ] Phase 3 completed
-- [ ] Phase 4 completed
-- [ ] Phase 5 completed
-- [ ] Phase 6 completed
+- [x] Phase 1 completed (`9d8ec2e` — Implement Phase 1 license reservation)
+- [x] Phase 2 completed (`5db0dd9`, `82a5b55`, `cb91e9f`, `ec812a7`, `7896adf` —
+      checkout and terminal payment lifecycle, reservation authority)
+- [x] Phase 3 completed (`ec812a7`, `7896adf` — finalization verifies
+      reservation authority before assigning permanent fulfilment)
+- [x] Phase 4 completed (`ba3d93b`, `7896adf` — release verifies reservation
+      authority before returning inventory)
+- [x] Phase 5 completed (webhooks share `complete_payment`/`fail_payment`, so
+      they inherit reservation-authority checks; see
+      `apps/payments/tests/test_webhooks.py` historical/out-of-order coverage)
+- [ ] Phase 6 completed — end-to-end and single-process regression tests exist,
+      but dedicated multi-threaded race coverage (competing orders/requests
+      for the same key) is not yet in the suite
 
-- [ ] ADR-001 fully implemented
+- [ ] ADR-001 fully implemented (blocked only on Phase 6 concurrency coverage)

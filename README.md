@@ -191,6 +191,16 @@ server-calculated item and total snapshots before payment.
 For Stripe setup and local webhook forwarding, see
 [API and payment guide](docs/API.md#stripe-checkout-and-webhooks).
 
+### License reservation
+
+Checkout reserves the complete order inventory before a payment is exposed to
+the customer, and `Order.reservation_payment_attempt` names the single
+payment authorized to finalize or release that reservation. A superseded or
+historical payment outcome can never finalize or release a newer attempt's
+reservation. See [ADR-001](docs/architecture/ADR-001-license-reservation.md)
+and its [implementation roadmap](docs/architecture/IMPLEMENTATION_ROADMAP.md)
+for the full design and phase-by-phase status.
+
 ## API
 
 The generated OpenAPI schema is the canonical request/response reference.
