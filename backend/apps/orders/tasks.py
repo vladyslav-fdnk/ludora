@@ -3,7 +3,10 @@ from smtplib import SMTPException
 
 from celery import shared_task
 
-from apps.orders.emails import build_order_confirmation_email
+from apps.orders.emails import (
+    build_order_confirmation_email,
+    has_complete_fulfilment,
+)
 from apps.orders.models import Order, Payment
 
 logger = logging.getLogger(__name__)
@@ -22,7 +25,7 @@ def send_order_confirmation_email(self, order_id: int) -> dict[str, object]:
     try:
         order = (
             Order.objects.select_related("product", "license_key")
-            .prefetch_related("items")
+            .prefetch_related("items__license_assignments__license_key")
             .get(pk=order_id)
         )
     except Order.DoesNotExist:
@@ -35,9 +38,9 @@ def send_order_confirmation_email(self, order_id: int) -> dict[str, object]:
 
     is_eligible = (
         order.status == Order.Status.PAID
-        and order.license_key_id is not None
         and order.price_paid is not None
         and order.payments.filter(status=Payment.Status.PAID).exists()
+        and has_complete_fulfilment(order)
     )
     if not is_eligible:
         logger.warning(

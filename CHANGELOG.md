@@ -56,12 +56,25 @@ below summarize how the portfolio project evolved.
   presentation.
 - Ruff linting for both Python applications and automated backend checks in
   GitHub Actions.
+- An order-owned, all-or-nothing license reservation lifecycle (ADR-001):
+  checkout durably reserves complete inventory before a payment is exposed,
+  and a single `reservation_payment_attempt` authority governs which payment
+  may finalize or release it.
+- Stripe Checkout as an alternate payment provider, with signed webhook
+  handling for asynchronous success, failure, and expiration events.
 
 ### Changed
 
 - Payment creation and direct-order confirmation now orchestrate through the
   provider boundary while preserving endpoint payloads, transactional
   fulfilment, retry rules, and post-commit email dispatch.
+- Payment finalization and release now verify reservation authority first, so
+  a historical or superseded payment attempt can never finalize or release a
+  newer attempt's reservation. Ambiguous transport failures during checkout
+  retain the payment and its reservation for idempotent retry instead of
+  rolling back.
+- `Payment.checkout_url` is now persisted, so a returned Stripe Checkout URL
+  survives beyond the request that created it.
 - Orders now support both direct purchases and multi-product cart checkout
   through immutable item snapshots. The legacy `product` field remains on
   compatible direct-order responses.
@@ -141,3 +154,6 @@ below summarize how the portfolio project evolved.
    operations.
 9. Migrated legacy order data and enforced financial and quantity
    integrity.
+10. Connected Stripe Checkout and signed webhooks, and introduced an
+    order-owned license reservation lifecycle with a single payment
+    authority governing finalization and release.

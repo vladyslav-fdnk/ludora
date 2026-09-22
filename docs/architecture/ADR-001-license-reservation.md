@@ -1,6 +1,6 @@
 # ADR-001 — License Reservation Architecture
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-28
 - Scope: Ludora backend order payment and digital-license fulfilment
 
@@ -79,6 +79,8 @@ The following existing invariants remain authoritative:
 4. The customer pays for the whole order in one checkout.
 5. One order may have at most one active payment, where active means
    `CREATED` or `PENDING`.
+   This invariant is enforced by a database partial unique constraint on the
+   order for those statuses, in addition to order-level serialization.
 6. A payment represents a payment attempt only. It does not own inventory or
    fulfilment.
 7. A license key can be assigned at most once.
@@ -117,12 +119,32 @@ Replacing a failed attempt for the same payable order does not redefine which
 inventory the order requires. This separation keeps payment history independent
 from inventory ownership.
 
+`Order.reservation_payment_attempt` is a nullable reference to the one
+`Payment` currently authorized to mutate the order's temporary reservation.
+The order continues to own the reservation; the reference records transition
+authority, not inventory ownership. A non-null authority must reference a
+payment belonging to the same order.
+
+Reservation authority guards both possible terminal mutations. Before either
+successful finalization or release changes any temporary assignment or
+`RESERVED` key, the operation must lock the order and verify:
+
+```text
+Order.reservation_payment_attempt == current Payment
+```
+
+An authority mismatch makes the event historical for reservation purposes. It
+must not sell, release, replace, or otherwise mutate the current reservation.
+In particular, delayed success for an older payment must never finalize a
+reservation controlled by a newer payment attempt.
+
 The active-payment invariant must continue to hold throughout reservation and
 checkout creation:
 
 ```text
 Order
 +-- zero or one active Payment (CREATED or PENDING)
+|   `-- zero or one reservation authority
 `-- OrderItem(s)
     `-- LicenseAssignment(s)
         `-- RESERVED LicenseKey(s)
@@ -133,6 +155,28 @@ serialized order-level operation. A competing request can neither create a
 second active payment nor reserve a second set of keys for the same order.
 Selection of keys must also exclude keys concurrently reserved or sold by
 another order.
+
+The database must additionally enforce at most one active payment per order
+with a partial unique constraint covering `CREATED` and `PENDING` payments.
+Application locking remains necessary for the wider aggregate transition, but
+it is not the sole protection for this invariant.
+
+The following reservation-authority invariants are mandatory:
+
+1. `reservation_payment_attempt` is null if and only if the order has no
+   temporary reservation.
+2. A non-null authority belongs to the same order and is the only payment that
+   may mutate that temporary reservation.
+3. Authority assignment, complete key reservation, and temporary assignment
+   creation commit atomically in one local transaction.
+4. Successful finalization verifies authority, sells the entire reservation,
+   makes assignments permanent, and clears authority atomically.
+5. Conclusive release verifies authority, releases every reserved key, removes
+   every temporary assignment, and clears authority atomically.
+6. A historical payment event may update only state belonging to that payment;
+   it cannot mutate or clear a newer payment's reservation authority.
+7. At most one active payment exists per order under both application locking
+   and the database partial unique constraint.
 
 ## 6. Reservation Lifecycle
 
@@ -148,15 +192,17 @@ Serialize activity for the Order
 Validate order and full payable total
            |
            v
-Reserve every required key atomically:
+Atomically establish local payment and reservation state:
+  Create/reuse the active Payment
+  Set Order.reservation_payment_attempt
   AVAILABLE -> RESERVED
   Create temporary LicenseAssignments
            |
            v
-Establish/reuse the Order's single active Payment
+Commit the complete local transaction
            |
            v
-Create or return external checkout
+Create or recover external checkout as a saga step
            |
       +----+----------------+
       |                     |
@@ -179,12 +225,16 @@ and no charge can succeed.
 Successful payment finalization changes all assigned keys from `RESERVED` to
 `SOLD`, records the paid outcome for the payment attempt and order, and retains
 the assignments as the fulfilment record. These changes are one atomic
-order-level transition.
+order-level transition. Finalization first verifies that the successful payment
+is the current reservation authority and clears that authority in the same
+transaction because the assignments are no longer temporary.
 
 Failed or expired payment finalization changes all keys reserved for the order
 from `RESERVED` to `AVAILABLE`, removes the temporary assignments, and records
 the attempt as no longer active. Release is also an all-or-nothing order-level
-transition.
+transition. Release first verifies that the unsuccessful payment is the current
+reservation authority and clears that authority atomically with assignment
+removal and key release.
 
 Duplicate requests and provider events must be idempotent. Reprocessing success
 must not sell additional keys; reprocessing failure or expiration must not
@@ -192,9 +242,32 @@ release keys that have already been sold.
 
 A reservation may be released only after the associated checkout is
 conclusively unable to succeed. Success and failure/expiration processing are
-serialized for the order. This prevents a late success from observing released
-inventory and preserves the rule that Ludora must never successfully charge a
-customer and then fail because keys are unavailable.
+serialized for the order and authorized against the current payment. A delayed
+historical event cannot observe or mutate a newer attempt's reservation.
+
+### Local transaction and external-provider saga
+
+Database changes and provider communication cannot form one atomic transaction.
+Checkout establishment is therefore an explicit saga:
+
+1. In one local transaction, lock the order, establish the single active
+   payment, set it as `reservation_payment_attempt`, reserve every required key,
+   and create every temporary assignment.
+2. After that transaction commits, call the provider using a stable
+   payment-derived idempotency key. Provider calls must not run inside the
+   database transaction.
+3. In a later local transaction, persist the provider checkout identity. A
+   checkout is returned to the customer only after this linkage is durable.
+4. On a definitive provider rejection proving that no checkout can charge,
+   atomically mark the attempt terminal, verify its authority, release its
+   reservation, and clear the authority.
+
+A timeout, lost response, process interruption, or other uncertain provider
+outcome is not proof that checkout creation failed. The payment remains the
+reservation authority and its inventory remains reserved while Ludora retries
+the same provider operation with the same idempotency key or reconciles the
+provider state. Release or replacement is permitted only after Ludora proves
+that the checkout was never created or is conclusively unable to charge.
 
 ## 7. Multi-item Orders
 
@@ -244,9 +317,15 @@ fail reservation.
 
 ### Payment-provider checkout creation fails
 
-Because the customer cannot complete the checkout, the payment attempt ceases
-to be active and the order reservation is released. Reserved keys return to
-`AVAILABLE`, and temporary assignments are removed.
+If the provider definitively rejects creation and proves that no checkout can
+charge, the payment attempt ceases to be active and its reservation is released
+and authority cleared atomically. Reserved keys return to `AVAILABLE`, and
+temporary assignments are removed.
+
+If creation has an ambiguous outcome, including a timeout or lost response, the
+attempt and reservation remain active. Ludora retries with the same idempotency
+key or reconciles provider state; it must not release inventory or authorize a
+replacement attempt while that checkout might still charge.
 
 ### Payment is pending
 
@@ -265,15 +344,19 @@ complete reservation.
 
 All reserved keys become `SOLD`, the temporary assignments become permanent
 fulfilment records, and the order and payment become paid. The operation is
-atomic and idempotent.
+atomic and idempotent, and is permitted only when the successful payment is the
+current reservation authority.
 
 ### Duplicate or out-of-order provider events
 
-Events are interpreted against the durable order, payment, assignment, and key
-states. A repeated success is a no-op after completion. A failure or expiration
-cannot undo a completed sale. Conflicting terminal events are resolved under
-serialized order processing, with a verified successful charge taking
-precedence over release.
+Events are interpreted against the durable order, payment, authority,
+assignment, and key states. A repeated success is a no-op after completion. A
+failure or expiration cannot undo a completed sale. Conflicting events for the
+current authority are resolved under serialized order processing. A success,
+failure, or expiration for a historical payment cannot mutate a newer
+payment's reservation. A verified historical charge is recorded for
+reconciliation and refund or manual resolution; it does not consume the newer
+reservation.
 
 ### Internal failure during finalization
 
@@ -309,6 +392,9 @@ can become chargeable.
 - `Order` is the aggregate root and owns one complete purchase lifecycle.
 - `Payment` represents only an attempt to pay for an order.
 - Reservation is owned by the `Order` aggregate.
+- One current payment attempt holds authority to finalize or release the
+  temporary reservation.
+- Every reservation mutation verifies that authority first.
 - `LicenseAssignment` binds specific inventory to an `OrderItem`.
 - `LicenseKey` owns only its inventory lifecycle state.
 - Required inventory must exist and be reserved before payment succeeds.
@@ -337,6 +423,8 @@ can become chargeable.
   signals.
 - Checkout, webhook, and expiration paths must coordinate around the same
   order-level state.
+- External provider creation is a saga and ambiguous outcomes retain inventory
+  until they are reconciled conclusively.
 - Operational visibility is required to identify reservations that remain
   pending longer than intended.
 - The order-level all-or-nothing rule may reject a checkout even when only one
@@ -384,8 +472,6 @@ the temporary assignment.
 
 - What reservation duration provides the right balance between customer
   checkout completion and inventory availability?
-- Which provider state is authoritative when local timeout policy and provider
-  expiration are observed at different times?
 - What operational threshold should identify a pending reservation for manual
   review?
 - What retention and audit requirements apply to the history of temporary
@@ -398,6 +484,7 @@ the temporary assignment.
 | Date | Revision |
 | --- | --- |
 | 2026-07-28 | Initial decision recording the order-owned license reservation architecture. |
+| 2026-07-31 | Accepted payment-attempt reservation authority, guarded success and release, provider saga handling, historical-event isolation, and database enforcement of one active payment. |
 
 ## Related ADRs
 

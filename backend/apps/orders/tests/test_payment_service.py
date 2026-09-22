@@ -87,6 +87,8 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
         self.assertEqual(payment.provider, "stripe")
         self.assertEqual(payment.transaction_id, self.checkout_session_id)
         self.assertEqual(payment.checkout_url, self.checkout_url)
+        order.refresh_from_db()
+        self.assertEqual(order.reservation_payment_attempt_id, payment.id)
         assignment = LicenseAssignment.objects.get(order_item__order=order)
         self.assertEqual(assignment.license_key.product, self.product)
         self.assertEqual(
@@ -154,7 +156,8 @@ class PaymentServiceTests(StripeCheckoutMixin, TestCase):
             create_payment(order, provider=FailingProvider())
 
         self.assertNotIn("private provider detail", str(error.exception))
-        self.assertFalse(Payment.objects.filter(order=order).exists())
+        failed_payment = Payment.objects.get(order=order)
+        self.assertEqual(failed_payment.status, Payment.Status.FAILED)
         self.assertFalse(OrderItem.objects.filter(order=order).exists())
         self.assertFalse(
             LicenseAssignment.objects.filter(order_item__order=order).exists()

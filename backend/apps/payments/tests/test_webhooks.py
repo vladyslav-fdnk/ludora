@@ -294,7 +294,7 @@ class StripeWebhookAPITests(TestCase):
         self.assertEqual(self.payment.status, Payment.Status.PAID)
 
     def _assert_historical_failure_preserves_paid_order(self, historical_status):
-        self.payment.status = historical_status
+        self.payment.status = Payment.Status.FAILED
         self.payment.save(update_fields=("status",))
         reserve_order_licenses(self.order.id)
         winning_payment = Payment.objects.create(
@@ -325,6 +325,9 @@ class StripeWebhookAPITests(TestCase):
 
         with patch("apps.orders.tasks.send_order_confirmation_email.delay"):
             process_stripe_webhook(success)
+
+        self.payment.status = historical_status
+        self.payment.save(update_fields=("status",))
 
         assignment = LicenseAssignment.objects.get(
             order_item__order=self.order

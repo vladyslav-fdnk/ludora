@@ -216,32 +216,69 @@ def release_order_license_reservation(
     return license_keys
 
 
-def fail_payment(*, order: Order, payment: Payment) -> Payment:
-    """Record a terminal payment failure and release its order reservation.
+def authorize_order_reservation(*, order: Order, payment: Payment) -> None:
+    """Bind an order's temporary inventory to its sole active payment."""
+    if payment.order_id != order.id:
+        raise OrderPaymentError("Payment does not belong to order")
+    if order.reservation_payment_attempt_id not in (None, payment.id):
+        raise OrderPaymentError("Order reservation belongs to another payment")
+    if order.reservation_payment_attempt_id != payment.id:
+        order.reservation_payment_attempt = payment
+        order.save(update_fields=("reservation_payment_attempt", "updated_at"))
+
+
+def terminate_payment(
+    *,
+    order: Order,
+    payment: Payment,
+    status: Payment.Status,
+) -> Payment:
+    """Record an unsuccessful terminal state and release the reservation.
 
     This internal helper does not own transaction boundaries. It must be called
     within an existing transaction after the caller has acquired row locks for
     both the Order and Payment.
     """
+    if status not in (
+        Payment.Status.FAILED,
+        Payment.Status.CANCELLED,
+        Payment.Status.EXPIRED,
+    ):
+        raise ValueError("Payment status is not terminal")
+
     if payment.status == Payment.Status.PAID:
         return payment
 
     if order.status == Order.Status.PAID:
-        if payment.status != Payment.Status.FAILED:
-            payment.status = Payment.Status.FAILED
+        if payment.status != status:
+            payment.status = status
             payment.save(update_fields=("status",))
         return payment
 
-    payment.status = Payment.Status.FAILED
-    payment.save(update_fields=("status",))
-    release_order_license_reservation(order.id)
+    if payment.status != status:
+        payment.status = status
+        payment.save(update_fields=("status",))
+    if order.reservation_payment_attempt_id in (None, payment.id):
+        release_order_license_reservation(order.id)
+        if order.reservation_payment_attempt_id is not None:
+            order.reservation_payment_attempt = None
+            order.save(update_fields=("reservation_payment_attempt", "updated_at"))
     return payment
+
+
+def fail_payment(*, order: Order, payment: Payment) -> Payment:
+    return terminate_payment(
+        order=order,
+        payment=payment,
+        status=Payment.Status.FAILED,
+    )
 
 
 def _fulfil_order(
     order_items: list[OrderItem],
     *,
     paid_at,
+    require_reservation: bool = False,
 ) -> list[LicenseKey]:
     if not order_items:
         raise OrderPaymentError(
@@ -268,6 +305,9 @@ def _fulfil_order(
             ("status", "sold_at"),
         )
         return license_keys
+
+    if require_reservation:
+        raise OrderPaymentError("Order reservation is inconsistent")
 
     assignments = []
     license_keys = []
@@ -333,23 +373,35 @@ def complete_payment(payment_id: int) -> CompletePaymentResult:
     if payment.amount != price_paid:
         raise OrderPaymentError("Payment amount does not match order total")
 
+    if (
+        order.reservation_payment_attempt_id is not None
+        and order.reservation_payment_attempt_id != payment.id
+    ):
+        raise OrderPaymentError("Payment is not authorized for order reservation")
+
     order_items = get_or_create_order_items_for_fulfilment(
         order,
         legacy_unit_price=price_paid,
     )
     paid_at = timezone.now()
-    license_keys = _fulfil_order(order_items, paid_at=paid_at)
+    license_keys = _fulfil_order(
+        order_items,
+        paid_at=paid_at,
+        require_reservation=order.reservation_payment_attempt_id is not None,
+    )
     if order.source == Order.Source.DIRECT:
         order.license_key = license_keys[0]
     order.status = Order.Status.PAID
     order.price_paid = price_paid
     order.paid_at = paid_at
+    order.reservation_payment_attempt = None
     order.save(
         update_fields=(
             "license_key",
             "status",
             "price_paid",
             "paid_at",
+            "reservation_payment_attempt",
             "updated_at",
         )
     )
@@ -412,7 +464,6 @@ def _pay_order(
     provider: PaymentProvider | None = None,
 ) -> Order:
     created_payment = False
-    created_provider_payment = False
     created_order_item_id = None
     with transaction.atomic():
         order = (
@@ -457,6 +508,7 @@ def _pay_order(
 
         had_order_items = order.items.exists()
         reserve_order_licenses(order.id)
+        authorize_order_reservation(order=order, payment=payment)
         if not had_order_items:
             created_order_item_id = (
                 OrderItem.objects.filter(order=order)
@@ -506,7 +558,6 @@ def _pay_order(
                     local_payment_id=payment.pk,
                 )
             )
-            created_provider_payment = True
             with transaction.atomic():
                 payment = Payment.objects.select_for_update().get(pk=payment.pk)
                 payment.provider = selected_provider.name
@@ -514,28 +565,25 @@ def _pay_order(
                 payment.save(update_fields=("provider", "transaction_id"))
         except ImproperlyConfigured as exc:
             with transaction.atomic():
-                if created_payment:
-                    Payment.objects.filter(pk=payment.pk).delete()
-                release_order_license_reservation(order.id)
+                locked_order = Order.objects.select_for_update().get(pk=order.pk)
+                locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
+                fail_payment(order=locked_order, payment=locked_payment)
                 OrderItem.objects.filter(pk=created_order_item_id).delete()
             raise OrderPaymentError(
                 "Payment provider configuration is invalid"
             ) from exc
         except PaymentProviderError as exc:
             with transaction.atomic():
-                if created_payment:
-                    Payment.objects.filter(pk=payment.pk).delete()
-                release_order_license_reservation(order.id)
+                locked_order = Order.objects.select_for_update().get(pk=order.pk)
+                locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
+                fail_payment(order=locked_order, payment=locked_payment)
                 OrderItem.objects.filter(pk=created_order_item_id).delete()
             raise OrderPaymentError(
                 "Payment provider could not confirm payment"
             ) from exc
         except Exception:
-            with transaction.atomic():
-                if created_payment:
-                    Payment.objects.filter(pk=payment.pk).delete()
-                release_order_license_reservation(order.id)
-                OrderItem.objects.filter(pk=created_order_item_id).delete()
+            # A transport failure leaves the external outcome ambiguous. Keep
+            # the payment and its reservation for a safe idempotent retry.
             raise
 
     try:
@@ -547,26 +595,13 @@ def _pay_order(
             "Payment provider configuration is invalid"
         ) from exc
     except PaymentProviderError as exc:
-        with transaction.atomic():
-            if created_payment:
-                Payment.objects.filter(pk=payment.pk).delete()
-            elif created_provider_payment:
-                Payment.objects.filter(pk=payment.pk).update(
-                    provider=None,
-                    transaction_id=None,
-                )
+        # Confirmation failed without a terminal provider result. The checkout
+        # may still complete, so retain its authority and reservation.
         raise OrderPaymentError(
             "Payment provider could not confirm payment"
         ) from exc
     except Exception:
-        with transaction.atomic():
-            if created_payment:
-                Payment.objects.filter(pk=payment.pk).delete()
-            elif created_provider_payment:
-                Payment.objects.filter(pk=payment.pk).update(
-                    provider=None,
-                    transaction_id=None,
-                )
+        # See the PaymentProviderError branch above: preserve ambiguous state.
         raise
 
     provider_outcome_error = None

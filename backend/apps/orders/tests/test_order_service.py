@@ -14,10 +14,12 @@ from apps.orders.exceptions import OrderPaymentError
 from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.orders.payment_services import create_payment
 from apps.orders.services import (
+    authorize_order_reservation,
     complete_payment,
     pay_order,
     release_order_license_reservation,
     reserve_order_licenses,
+    terminate_payment,
 )
 from apps.payments.exceptions import PaymentProviderError
 from apps.payments.providers import LocalConfirmation, LocalPaymentProvider
@@ -470,7 +472,10 @@ class OrderServiceTests(TestCase):
             pay_order(order.id, provider=FailingProvider())
 
         self.assertNotIn("private detail", str(error.exception))
-        self.assertFalse(Payment.objects.filter(order=order).exists())
+        failed_payment = Payment.objects.get(order=order)
+        self.assertEqual(failed_payment.status, Payment.Status.FAILED)
+        order.refresh_from_db()
+        self.assertIsNone(order.reservation_payment_attempt_id)
         self.license_key.refresh_from_db()
         self.assertEqual(self.license_key.status, LicenseKey.Status.AVAILABLE)
 
@@ -1205,6 +1210,73 @@ class LicenseReservationTests(TestCase):
         keys[2].refresh_from_db()
         self.assertEqual(keys[2].status, LicenseKey.Status.RESERVED)
 
+    def test_unsuccessful_terminal_payments_release_reservations_idempotently(self):
+        for status in (
+            Payment.Status.FAILED,
+            Payment.Status.CANCELLED,
+            Payment.Status.EXPIRED,
+        ):
+            with self.subTest(status=status):
+                order, _ = self.create_order()
+                key = self.create_keys(
+                    self.product,
+                    1,
+                    prefix=status,
+                )[0]
+                payment = Payment.objects.create(
+                    order=order,
+                    status=Payment.Status.PENDING,
+                    amount=order.total_price,
+                )
+                reserve_order_licenses(order.id)
+
+                terminate_payment(
+                    order=order,
+                    payment=payment,
+                    status=status,
+                )
+                terminate_payment(
+                    order=order,
+                    payment=payment,
+                    status=status,
+                )
+
+                payment.refresh_from_db()
+                key.refresh_from_db()
+                self.assertEqual(payment.status, status)
+                self.assertEqual(key.status, LicenseKey.Status.AVAILABLE)
+                self.assertFalse(
+                    LicenseAssignment.objects.filter(
+                        order_item__order=order,
+                    ).exists()
+                )
+
+    def test_paid_payment_is_not_changed_or_released(self):
+        order, _ = self.create_order()
+        key = self.create_keys(self.product, 1, prefix="PAID")[0]
+        payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=order.total_price,
+        )
+        reserve_order_licenses(order.id)
+        complete_payment(payment.id)
+        payment.refresh_from_db()
+
+        terminate_payment(
+            order=order,
+            payment=payment,
+            status=Payment.Status.FAILED,
+        )
+
+        payment.refresh_from_db()
+        key.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.PAID)
+        self.assertEqual(key.status, LicenseKey.Status.SOLD)
+        self.assertTrue(
+            LicenseAssignment.objects.filter(order_item__order=order).exists()
+        )
+
     def test_release_rejects_paid_order_and_sold_inventory(self):
         paid_order, _ = self.create_order()
         paid_order.status = Order.Status.PAID
@@ -1264,6 +1336,68 @@ class LicenseReservationTests(TestCase):
                 ],
             ),
         )
+
+    def test_historical_payment_cannot_complete_a_newer_reservation(self):
+        order, _ = self.create_order()
+        key = self.create_keys(self.product, 1)[0]
+        historical_payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=order.total_price,
+        )
+        reserve_order_licenses(order.id)
+        authorize_order_reservation(order=order, payment=historical_payment)
+        terminate_payment(
+            order=order,
+            payment=historical_payment,
+            status=Payment.Status.FAILED,
+        )
+        current_payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=order.total_price,
+        )
+        reserve_order_licenses(order.id)
+        order.refresh_from_db()
+        authorize_order_reservation(order=order, payment=current_payment)
+
+        with self.assertRaisesMessage(
+            OrderPaymentError,
+            "Payment is not authorized for order reservation",
+        ):
+            complete_payment(historical_payment.id)
+
+        order.refresh_from_db()
+        key.refresh_from_db()
+        self.assertEqual(order.reservation_payment_attempt_id, current_payment.id)
+        self.assertEqual(key.status, LicenseKey.Status.RESERVED)
+
+    def test_historical_failure_cannot_release_a_newer_reservation(self):
+        order, _ = self.create_order()
+        key = self.create_keys(self.product, 1)[0]
+        historical_payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.FAILED,
+            amount=order.total_price,
+        )
+        current_payment = Payment.objects.create(
+            order=order,
+            status=Payment.Status.PENDING,
+            amount=order.total_price,
+        )
+        reserve_order_licenses(order.id)
+        authorize_order_reservation(order=order, payment=current_payment)
+
+        terminate_payment(
+            order=order,
+            payment=historical_payment,
+            status=Payment.Status.EXPIRED,
+        )
+
+        order.refresh_from_db()
+        key.refresh_from_db()
+        self.assertEqual(order.reservation_payment_attempt_id, current_payment.id)
+        self.assertEqual(key.status, LicenseKey.Status.RESERVED)
 
 
 class ConcurrentLicenseReservationTests(TransactionTestCase):
