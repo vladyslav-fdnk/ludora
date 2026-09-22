@@ -453,8 +453,14 @@ They must preserve the ownership and lifecycle decisions in ADR-001.
 - [x] Phase 5 completed (webhooks share `complete_payment`/`fail_payment`, so
       they inherit reservation-authority checks; see
       `apps/payments/tests/test_webhooks.py` historical/out-of-order coverage)
-- [ ] Phase 6 completed — end-to-end and single-process regression tests exist,
-      but dedicated multi-threaded race coverage (competing orders/requests
-      for the same key) is not yet in the suite
+- [x] Phase 6 completed — multi-threaded race coverage in
+      `apps/orders/tests/test_order_service.py`
+      (`test_competing_orders_cannot_reserve_the_same_limited_key`,
+      `test_same_order_reservations_converge_on_one_assignment`,
+      `test_simultaneous_reservation_and_release_leave_valid_state`) and
+      `test_payment_service.py`
+      (`test_competing_attempts_create_only_one_active_payment`), plus
+      out-of-order/duplicate webhook coverage in
+      `apps/payments/tests/test_webhooks.py`
 
-- [ ] ADR-001 fully implemented (blocked only on Phase 6 concurrency coverage)
+- [x] ADR-001 fully implemented
