@@ -4,6 +4,43 @@ from django.core.mail import EmailMessage
 from apps.orders.models import Order
 
 
+def assigned_license_key_values(order: Order) -> list[str]:
+    """Return the fulfilled keys in stable order for an order email."""
+    values = [
+        assignment.license_key.value
+        for item in order.items.all()
+        for assignment in item.license_assignments.all()
+    ]
+    if values:
+        return values
+    if order.license_key_id is not None:
+        return [order.license_key.value]
+    return []
+
+
+def has_complete_fulfilment(order: Order) -> bool:
+    """Check that every purchased unit has a sold license key."""
+    items = list(order.items.all())
+    assignments = [
+        assignment
+        for item in items
+        for assignment in item.license_assignments.all()
+    ]
+    if assignments:
+        return (
+            len(assignments) == sum(item.quantity for item in items)
+            and all(
+                assignment.license_key.status == assignment.license_key.Status.SOLD
+                for assignment in assignments
+            )
+        )
+    return (
+        order.source == Order.Source.DIRECT
+        and order.license_key_id is not None
+        and order.license_key.status == order.license_key.Status.SOLD
+    )
+
+
 def build_order_confirmation_email(order: Order) -> EmailMessage:
     """Build the plain-text confirmation from committed order state."""
     product_lines = [
@@ -12,6 +49,9 @@ def build_order_confirmation_email(order: Order) -> EmailMessage:
     ]
     if not product_lines and order.product_id is not None:
         product_lines = [f"- {order.product.title}"]
+    license_key_lines = [
+        f"- {value}" for value in assigned_license_key_values(order)
+    ]
 
     body = "\n".join(
         [
@@ -23,7 +63,7 @@ def build_order_confirmation_email(order: Order) -> EmailMessage:
             *product_lines,
             "",
             "License keys:",
-            f"- {order.license_key.value}",
+            *license_key_lines,
             "",
             f"Total paid: {order.price_paid}",
             "",

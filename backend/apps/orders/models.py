@@ -210,6 +210,12 @@ class Payment(models.Model):
         unique=True,
     )
 
+    checkout_url = models.URLField(
+        max_length=2048,
+        blank=True,
+        null=True,
+    )
+
     amount = models.DecimalField(
         max_digits=10,
         decimal_places=2,

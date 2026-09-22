@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from apps.games.models import LicenseKey, Platform, Product
 from apps.orders.emails import build_order_confirmation_email
-from apps.orders.models import Order, OrderItem, Payment
+from apps.orders.models import LicenseAssignment, Order, OrderItem, Payment
 from apps.orders.tasks import send_order_confirmation_email
 
 
@@ -71,6 +71,99 @@ class OrderEmailCompositionTests(OrderEmailTestCase):
 
 
 class OrderEmailTaskTests(OrderEmailTestCase):
+    def test_task_sends_every_assigned_key_for_paid_cart_order(self):
+        second_product = Product.objects.create(
+            title="Expansion Pack",
+            slug="expansion-pack",
+            price=Decimal("14.99"),
+            product_type=Product.ProductType.DLC,
+            platform=self.platform,
+        )
+        second_key = LicenseKey.objects.create(
+            product=second_product,
+            value="CART-KEY-456",
+            status=LicenseKey.Status.SOLD,
+            sold_at=timezone.now(),
+        )
+        cart_order = Order.objects.create(
+            email="cart-buyer@example.com",
+            source=Order.Source.CART,
+            status=Order.Status.PAID,
+            total_price=Decimal("74.98"),
+            price_paid=Decimal("74.98"),
+            paid_at=timezone.now(),
+        )
+        first_item = OrderItem.objects.create(
+            order=cart_order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=1,
+            unit_price=self.product.price,
+        )
+        second_item = OrderItem.objects.create(
+            order=cart_order,
+            product=second_product,
+            product_title=second_product.title,
+            quantity=1,
+            unit_price=second_product.price,
+        )
+        LicenseAssignment.objects.create(
+            order_item=first_item,
+            license_key=self.license_key,
+        )
+        LicenseAssignment.objects.create(
+            order_item=second_item,
+            license_key=second_key,
+        )
+        Payment.objects.create(
+            order=cart_order,
+            status=Payment.Status.PAID,
+            amount=cart_order.price_paid,
+            paid_at=cart_order.paid_at,
+        )
+
+        result = send_order_confirmation_email.apply(args=[cart_order.pk]).get()
+
+        self.assertEqual(result, {"order_id": cart_order.pk, "status": "sent"})
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.license_key.value, mail.outbox[0].body)
+        self.assertIn(second_key.value, mail.outbox[0].body)
+
+    def test_task_skips_cart_order_with_incomplete_key_assignments(self):
+        cart_order = Order.objects.create(
+            email="cart-buyer@example.com",
+            source=Order.Source.CART,
+            status=Order.Status.PAID,
+            total_price=Decimal("119.98"),
+            price_paid=Decimal("119.98"),
+            paid_at=timezone.now(),
+        )
+        item = OrderItem.objects.create(
+            order=cart_order,
+            product=self.product,
+            product_title=self.product.title,
+            quantity=2,
+            unit_price=self.product.price,
+        )
+        LicenseAssignment.objects.create(
+            order_item=item,
+            license_key=self.license_key,
+        )
+        Payment.objects.create(
+            order=cart_order,
+            status=Payment.Status.PAID,
+            amount=cart_order.price_paid,
+            paid_at=cart_order.paid_at,
+        )
+
+        result = send_order_confirmation_email.apply(args=[cart_order.pk]).get()
+
+        self.assertEqual(
+            result,
+            {"order_id": cart_order.pk, "status": "ineligible"},
+        )
+        self.assertEqual(mail.outbox, [])
+
     def test_task_sends_exactly_one_email_for_eligible_order(self):
         with self.assertLogs("apps.orders.tasks", level="INFO") as logs:
             result = send_order_confirmation_email.apply(args=[self.order.pk]).get()
