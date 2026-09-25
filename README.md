@@ -269,8 +269,7 @@ the customer, and `Order.reservation_payment_attempt` names the single
 payment authorized to finalize or release that reservation. A superseded or
 historical payment outcome can never finalize or release a newer attempt's
 reservation. See [ADR-001](docs/architecture/ADR-001-license-reservation.md)
-and its [implementation roadmap](docs/architecture/IMPLEMENTATION_ROADMAP.md)
-for the full design and phase-by-phase status.
+for the full design and its consequences.
 
 ## API
 
@@ -330,7 +329,7 @@ ludora/
 ├── docs/
 │   ├── API.md                  # endpoint and payment integration guide
 │   ├── ARCHITECTURE.md         # architecture and lifecycle guarantees
-│   └── REPOSITORY_HYGIENE.md   # review findings and follow-up work
+│   └── architecture/           # ADRs and archived implementation notes
 ├── docker/nginx/               # reverse proxy configuration
 ├── docker-compose.yml          # local development topology
 ├── docker-compose.prod.yml     # gunicorn + nginx production topology
@@ -346,9 +345,6 @@ The core purchase flow is complete and covered by tests. Known limitations:
   database backups; these belong to the hosting environment.
 - Stripe completion is webhook-driven only. The synchronous `/pay/` command is
   supported for the local provider.
-
-See [Repository hygiene](docs/REPOSITORY_HYGIENE.md) for deliberate
-compatibility fields and planned cleanup.
 
 ---
 
