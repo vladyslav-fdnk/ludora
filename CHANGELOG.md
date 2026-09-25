@@ -80,6 +80,10 @@ below summarize how the portfolio project evolved.
 
 ### Changed
 
+- OpenAPI enums for order and payment status have stable names
+  (`OrderStatusEnum`, `PaymentStatusEnum`), and CI fails on schema warnings.
+- Remaining "Game Key Store" package descriptions and example database names
+  now use the Ludora name.
 - Bot callback handlers send a new message when Telegram reports the original
   message as inaccessible, instead of failing on `edit_text`.
 - Archived the ADR-001 implementation roadmap and phase design under

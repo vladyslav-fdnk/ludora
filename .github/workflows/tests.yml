@@ -71,6 +71,9 @@ jobs:
       - name: Run Django system checks
         run: uv run --frozen python manage.py check
 
+      - name: Validate OpenAPI schema
+        run: uv run --frozen python manage.py spectacular --validate --fail-on-warn --file /tmp/schema.yml
+
       - name: Check migration consistency
         run: uv run --frozen python manage.py makemigrations --check --dry-run
 

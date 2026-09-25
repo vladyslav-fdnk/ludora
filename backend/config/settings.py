@@ -179,6 +179,13 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "REST API for the Ludora digital products store.",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    # Several models have a "status" field; give each choice set a stable name
+    # instead of an auto-generated hash suffix, so generated clients stay stable.
+    "ENUM_NAME_OVERRIDES": {
+        "OrderStatusEnum": "apps.orders.models.Order.Status",
+        "PaymentStatusEnum": "apps.orders.models.Payment.Status",
+        "LicenseKeyStatusEnum": "apps.games.models.LicenseKey.Status",
+    },
 }
 
 AUTH_USER_MODEL = "users.User"
