@@ -92,6 +92,11 @@ class StripeWebhookAPITests(TestCase):
             value="WEBHOOK-KEY",
         )
 
+    @property
+    def checkout_session_id(self) -> str:
+        assert self.payment.transaction_id is not None
+        return self.payment.transaction_id
+
     def post(self, payload: bytes, signature: str):
         return self.client.post(
             self.url,
@@ -167,7 +172,7 @@ class StripeWebhookAPITests(TestCase):
             event_id="evt_duplicate",
             event_type=StripeCheckoutEventType.COMPLETED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="paid",
             ),
@@ -273,7 +278,7 @@ class StripeWebhookAPITests(TestCase):
             event_id="evt_success_first",
             event_type=StripeCheckoutEventType.COMPLETED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="paid",
             ),
@@ -297,18 +302,19 @@ class StripeWebhookAPITests(TestCase):
         self.payment.status = Payment.Status.FAILED
         self.payment.save(update_fields=("status",))
         reserve_order_licenses(self.order.id)
+        winning_session_id = f"cs_winning_{historical_status.lower()}"
         winning_payment = Payment.objects.create(
             order=self.order,
             status=Payment.Status.PENDING,
             amount=Decimal("19.99"),
             provider="stripe",
-            transaction_id=f"cs_winning_{historical_status.lower()}",
+            transaction_id=winning_session_id,
         )
         success = StripeWebhookResult(
             event_id=f"evt_winning_{historical_status.lower()}",
             event_type=StripeCheckoutEventType.COMPLETED,
             checkout_session=StripeCheckoutSession(
-                id=winning_payment.transaction_id,
+                id=winning_session_id,
                 local_payment_id=str(winning_payment.id),
                 payment_status="paid",
             ),
@@ -317,7 +323,7 @@ class StripeWebhookAPITests(TestCase):
             event_id=f"evt_historical_failure_{historical_status.lower()}",
             event_type=StripeCheckoutEventType.EXPIRED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="unpaid",
             ),
@@ -370,7 +376,7 @@ class StripeWebhookAPITests(TestCase):
             event_id="evt_failure_first",
             event_type=StripeCheckoutEventType.ASYNC_PAYMENT_FAILED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="unpaid",
             ),
@@ -379,7 +385,7 @@ class StripeWebhookAPITests(TestCase):
             event_id="evt_success_second",
             event_type=StripeCheckoutEventType.ASYNC_PAYMENT_SUCCEEDED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="paid",
             ),
@@ -400,7 +406,7 @@ class StripeWebhookAPITests(TestCase):
             event_id="evt_duplicate_failure",
             event_type=StripeCheckoutEventType.EXPIRED,
             checkout_session=StripeCheckoutSession(
-                id=self.payment.transaction_id,
+                id=self.checkout_session_id,
                 local_payment_id=str(self.payment.id),
                 payment_status="unpaid",
             ),
@@ -503,6 +509,7 @@ class StripeWebhookParserTests(SimpleTestCase):
                 self.assertTrue(result.is_supported)
                 self.assertEqual(result.event_id, "evt_test_webhook")
                 self.assertEqual(result.event_type, event_type.value)
+                assert result.checkout_session is not None
                 self.assertEqual(
                     result.checkout_session.id,
                     "cs_test_webhook",

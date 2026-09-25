@@ -115,6 +115,7 @@ class OrderEmailTaskTests(OrderEmailTestCase):
             order_item=second_item,
             license_key=second_key,
         )
+        assert cart_order.price_paid is not None
         Payment.objects.create(
             order=cart_order,
             status=Payment.Status.PAID,
@@ -122,7 +123,7 @@ class OrderEmailTaskTests(OrderEmailTestCase):
             paid_at=cart_order.paid_at,
         )
 
-        result = send_order_confirmation_email.apply(args=[cart_order.pk]).get()
+        result = send_order_confirmation_email.apply(args=(cart_order.pk,)).get()
 
         self.assertEqual(result, {"order_id": cart_order.pk, "status": "sent"})
         self.assertEqual(len(mail.outbox), 1)
@@ -149,6 +150,7 @@ class OrderEmailTaskTests(OrderEmailTestCase):
             order_item=item,
             license_key=self.license_key,
         )
+        assert cart_order.price_paid is not None
         Payment.objects.create(
             order=cart_order,
             status=Payment.Status.PAID,
@@ -156,7 +158,7 @@ class OrderEmailTaskTests(OrderEmailTestCase):
             paid_at=cart_order.paid_at,
         )
 
-        result = send_order_confirmation_email.apply(args=[cart_order.pk]).get()
+        result = send_order_confirmation_email.apply(args=(cart_order.pk,)).get()
 
         self.assertEqual(
             result,
@@ -166,14 +168,14 @@ class OrderEmailTaskTests(OrderEmailTestCase):
 
     def test_task_sends_exactly_one_email_for_eligible_order(self):
         with self.assertLogs("apps.orders.tasks", level="INFO") as logs:
-            result = send_order_confirmation_email.apply(args=[self.order.pk]).get()
+            result = send_order_confirmation_email.apply(args=(self.order.pk,)).get()
 
         self.assertEqual(result, {"order_id": self.order.pk, "status": "sent"})
         self.assertEqual(len(mail.outbox), 1)
         self.assertNotIn(self.license_key.value, "\n".join(logs.output))
 
     def test_task_safely_handles_missing_order(self):
-        result = send_order_confirmation_email.apply(args=[999_999]).get()
+        result = send_order_confirmation_email.apply(args=(999_999,)).get()
 
         self.assertEqual(result, {"order_id": 999_999, "status": "missing"})
         self.assertEqual(mail.outbox, [])
@@ -194,7 +196,7 @@ class OrderEmailTaskTests(OrderEmailTestCase):
                 self.order.payments.update(status=payment_status)
 
                 result = send_order_confirmation_email.apply(
-                    args=[self.order.pk]
+                    args=(self.order.pk,)
                 ).get()
 
                 self.assertEqual(

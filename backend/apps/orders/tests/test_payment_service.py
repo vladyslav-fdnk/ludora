@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from threading import Barrier
@@ -25,6 +26,8 @@ from apps.payments.providers import (
 
 
 class StripeCheckoutMixin:
+    addCleanup: Callable[..., None]
+
     checkout_session_id = "cs_test_payment_service"
     checkout_url = (
         "https://checkout.stripe.com/c/pay/cs_test_payment_service"

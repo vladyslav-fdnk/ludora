@@ -12,6 +12,8 @@ from apps.orders.models import Order, OrderItem, Payment
 
 User = get_user_model()
 
+TRANSACTION_ID = "txn-admin-search-123"
+
 
 class TransactionAdminTests(TestCase):
     def setUp(self):
@@ -48,7 +50,7 @@ class TransactionAdminTests(TestCase):
             order=self.order,
             status=Payment.Status.PAID,
             provider="local",
-            transaction_id="txn-admin-search-123",
+            transaction_id=TRANSACTION_ID,
             amount=Decimal("29.99"),
             paid_at=timezone.now(),
         )
@@ -82,7 +84,7 @@ class TransactionAdminTests(TestCase):
         self.assertContains(response, "Order items")
         self.assertContains(response, "Payments")
         self.assertContains(response, "Payment ID")
-        self.assertContains(response, self.payment.transaction_id)
+        self.assertContains(response, TRANSACTION_ID)
         self.assertNotContains(response, 'name="items-0-DELETE"')
         self.assertNotContains(response, 'name="payments-0-DELETE"')
         self.assertContains(
@@ -123,16 +125,16 @@ class TransactionAdminTests(TestCase):
         self.assertContains(response, "Provider")
         self.assertContains(response, "Transaction id")
         self.assertContains(response, "Paid at")
-        self.assertContains(response, self.payment.transaction_id)
+        self.assertContains(response, TRANSACTION_ID)
         self.assertContains(response, ">Paid</span>", html=False)
 
     def test_payment_searches_by_transaction_id(self):
         response = self.client.get(
             reverse("admin:orders_payment_changelist"),
-            {"q": self.payment.transaction_id},
+            {"q": TRANSACTION_ID},
         )
 
-        self.assertContains(response, self.payment.transaction_id)
+        self.assertContains(response, TRANSACTION_ID)
         self.assertEqual(list(response.context["cl"].result_list), [self.payment])
 
     def test_payment_creation_and_deletion_are_disabled(self):

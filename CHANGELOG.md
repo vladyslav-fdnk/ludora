@@ -15,8 +15,9 @@ below summarize how the portfolio project evolved.
 - Per-IP rate limiting for registration, login, and token refresh, with
   proxy-aware client IP detection and Redis-backed counters in production.
 
-- mypy with the Django and DRF plugins for backend application code and for
-  the bot, and branch coverage reporting with minimum thresholds in CI.
+- mypy with the Django and DRF plugins for the whole backend, including tests,
+  and for the bot package, and branch coverage reporting with minimum
+  thresholds in CI.
 
 - An idempotent `seed_demo` management command that loads a demo catalogue of
   platforms, categories, products, and fake license keys.

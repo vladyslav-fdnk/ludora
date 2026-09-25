@@ -60,7 +60,7 @@ class LocalPaymentProviderTests(SimpleTestCase):
 
     def test_invalid_simulation_and_reference_are_rejected(self):
         with self.assertRaises(PaymentProviderRejected):
-            LocalPaymentProvider(confirmation="SUCCEED")
+            LocalPaymentProvider(confirmation="SUCCEED")  # type: ignore[arg-type]
 
         with self.assertRaises(PaymentProviderRejected):
             LocalPaymentProvider().confirm_payment("other-pay-1")
@@ -176,7 +176,7 @@ class StripeProviderTests(SimpleTestCase):
                 url="https://checkout.stripe.com/c/pay/cs_test_example",
             )
         )
-        provider.client = SimpleNamespace(
+        provider.client = SimpleNamespace(  # type: ignore[assignment]
             v1=SimpleNamespace(
                 checkout=SimpleNamespace(
                     sessions=SimpleNamespace(create=create)
@@ -233,7 +233,7 @@ class StripeProviderTests(SimpleTestCase):
         create = Mock(
             return_value=SimpleNamespace(id="cs_test_example", url=None)
         )
-        provider.client = SimpleNamespace(
+        provider.client = SimpleNamespace(  # type: ignore[assignment]
             v1=SimpleNamespace(
                 checkout=SimpleNamespace(
                     sessions=SimpleNamespace(create=create)
@@ -260,7 +260,7 @@ class StripeProviderTests(SimpleTestCase):
         create = Mock(
             side_effect=stripe.APIConnectionError("Stripe unavailable")
         )
-        provider.client = SimpleNamespace(
+        provider.client = SimpleNamespace(  # type: ignore[assignment]
             v1=SimpleNamespace(
                 checkout=SimpleNamespace(
                     sessions=SimpleNamespace(create=create)

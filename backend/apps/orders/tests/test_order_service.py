@@ -246,6 +246,7 @@ class OrderServiceTests(TestCase):
         self.assertEqual(Payment.objects.filter(order=order).count(), 1)
         self.assertEqual(payment.status, Payment.Status.PAID)
         self.assertEqual(payment.provider, "local")
+        assert payment.transaction_id is not None
         self.assertTrue(payment.transaction_id.startswith("local-pay-"))
 
     @override_settings(PAYMENT_PROVIDER="changed-default")
@@ -703,6 +704,7 @@ class OrderServiceTests(TestCase):
 
         self.assertEqual(order.price_paid, Decimal("59.99"))
         self.assertEqual(payment.amount, Decimal("59.99"))
+        assert order.product is not None
         self.assertEqual(order.product.price, Decimal("79.99"))
         self.assertEqual(assignment.id, reserved_assignment.id)
         self.assertEqual(assignment.license_key.status, LicenseKey.Status.SOLD)

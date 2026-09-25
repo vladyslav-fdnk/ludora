@@ -60,4 +60,4 @@ def test_diagnostic_task_input_and_output_are_json_serializable():
 @pytest.mark.parametrize("message", ["", "x" * 201])
 def test_diagnostic_task_rejects_invalid_message_length(message):
     with pytest.raises(ValueError, match="between 1 and 200"):
-        log_worker_probe.apply(args=[message]).get()
+        log_worker_probe.apply(args=(message,)).get()
