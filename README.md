@@ -31,9 +31,10 @@ and unreliable external systems, not CRUD volume.
   catalogue changes never rewrite purchase history.
 - **Thin Telegram client.** The bot talks only to the public API, with no
   database access, and supports English and Russian.
-- **Tested against real PostgreSQL.** About 400 backend and bot tests, plus
-  Ruff, Django system checks, and migration-drift checks, run in GitHub Actions
-  on every push and pull request.
+- **Tested against real PostgreSQL.** About 400 backend and bot tests (94%
+  backend and 77% bot branch coverage), plus Ruff, mypy with the Django and DRF
+  plugins, Django system checks, and migration-drift checks, run in GitHub
+  Actions on every push and pull request. CI fails on coverage regressions.
 
 ## Stack
 
@@ -295,25 +296,29 @@ Typical checks mirror CI:
 cd backend
 uv sync --frozen
 uv run ruff check .
+uv run mypy .
 uv run python manage.py check
 uv run python manage.py makemigrations --check --dry-run
-uv run pytest
+uv run pytest --cov
 
 cd ../bot
 uv sync --frozen
 uv run ruff check .
-uv run pytest
+uv run mypy app
+uv run pytest --cov
 ```
 
 With running containers:
 
 ```bash
 docker compose exec backend uv run ruff check .
+docker compose exec backend uv run mypy .
 docker compose exec backend uv run python manage.py check
 docker compose exec backend uv run python manage.py makemigrations --check --dry-run
-docker compose exec backend uv run pytest
+docker compose exec backend uv run pytest --cov
 docker compose exec bot uv run ruff check .
-docker compose exec bot uv run pytest
+docker compose exec bot uv run mypy app
+docker compose exec bot uv run pytest --cov
 ```
 
 Use `docker compose run --rm <service> ...` instead when the service is not

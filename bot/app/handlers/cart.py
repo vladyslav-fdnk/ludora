@@ -17,7 +17,7 @@ from app.keyboards.cart import (
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_cart, format_order_detail
 
-from .common import active_language, show_error
+from .common import active_language, edit_or_send, show_error
 
 router = Router(name="cart")
 
@@ -37,10 +37,10 @@ async def _show_cart(
             else None
         )
         if isinstance(event, CallbackQuery):
-            if event.message:
-                await event.message.edit_text(
-                    format_cart(cart, language, translator), reply_markup=markup
-                )
+            await edit_or_send(
+                event,
+                format_cart(cart, language, translator), reply_markup=markup
+            )
         else:
             await event.answer(
                 format_cart(cart, language, translator), reply_markup=markup
@@ -76,11 +76,11 @@ async def add_to_cart(
         await auth_service.add_cart_item(
             callback.from_user, callback_data.product_id, 1
         )
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get("cart.added", language),
-                reply_markup=added_to_cart_keyboard(language, translator),
-            )
+        await edit_or_send(
+            callback,
+            translator.get("cart.added", language),
+            reply_markup=added_to_cart_keyboard(language, translator),
+        )
     except APIError as error:
         await show_error(callback, error, language, translator)
     except Exception as error:
@@ -102,19 +102,19 @@ async def change_cart_item(
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
     if not _owned(callback, callback_data.owner_id):
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get("error.invalid_callback", language)
-            )
+        await edit_or_send(
+            callback,
+            translator.get("error.invalid_callback", language)
+        )
         return
     try:
         cart = await auth_service.get_cart(callback.from_user)
         item = next((item for item in cart.items if item.id == callback_data.item_id), None)
         if item is None:
-            if callback.message:
-                await callback.message.edit_text(
-                    translator.get("error.resource_not_found", language)
-                )
+            await edit_or_send(
+                callback,
+                translator.get("error.resource_not_found", language)
+            )
             return
         if callback_data.action == "remove" or (
             callback_data.action == "dec" and item.quantity == 1
@@ -141,10 +141,10 @@ async def cart_action(
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
     if not _owned(callback, callback_data.owner_id):
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get("error.invalid_callback", language)
-            )
+        await edit_or_send(
+            callback,
+            translator.get("error.invalid_callback", language)
+        )
         return
     if callback_data.action in {"clear", "checkout"}:
         key = (
@@ -152,39 +152,39 @@ async def cart_action(
             if callback_data.action == "clear"
             else "cart.checkout_confirm"
         )
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get(key, language),
-                reply_markup=confirmation_keyboard(
-                    callback_data.action,
-                    callback_data.owner_id,
-                    language,
-                    translator,
-                ),
-            )
+        await edit_or_send(
+            callback,
+            translator.get(key, language),
+            reply_markup=confirmation_keyboard(
+                callback_data.action,
+                callback_data.owner_id,
+                language,
+                translator,
+            ),
+        )
         return
     try:
         if callback_data.action == "clear_yes":
             await auth_service.clear_cart(callback.from_user)
-            if callback.message:
-                await callback.message.edit_text(
-                    translator.get("cart.cleared", language)
-                )
+            await edit_or_send(
+                callback,
+                translator.get("cart.cleared", language)
+            )
         else:
             order = await auth_service.checkout_cart(callback.from_user)
             await auth_service.pay_order(callback.from_user, order.id)
             paid_order = await auth_service.get_my_order(
                 callback.from_user, order.id
             )
-            if callback.message:
-                await callback.message.edit_text(
-                    "\n\n".join(
-                        (
-                            translator.get("payment.completed", language),
-                            format_order_detail(paid_order, language, translator),
-                        )
+            await edit_or_send(
+                callback,
+                "\n\n".join(
+                    (
+                        translator.get("payment.completed", language),
+                        format_order_detail(paid_order, language, translator),
                     )
                 )
+            )
     except APIError as error:
         await show_error(callback, error, language, translator)
     except Exception as error:
@@ -199,7 +199,7 @@ async def invalid_cart_callback(
 ) -> None:
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
-    if callback.message:
-        await callback.message.edit_text(
-            translator.get("error.invalid_callback", language)
-        )
+    await edit_or_send(
+        callback,
+        translator.get("error.invalid_callback", language)
+    )

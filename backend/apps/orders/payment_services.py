@@ -82,14 +82,16 @@ def create_payment(
             locked_order = Order.objects.select_for_update().get(pk=order.pk)
             locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
             fail_payment(order=locked_order, payment=locked_payment)
-            OrderItem.objects.filter(pk=created_order_item_id).delete()
+            if created_order_item_id is not None:
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
         raise OrderPaymentError("Payment provider could not create payment") from exc
     except ImproperlyConfigured as exc:
         with transaction.atomic():
             locked_order = Order.objects.select_for_update().get(pk=order.pk)
             locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
             fail_payment(order=locked_order, payment=locked_payment)
-            OrderItem.objects.filter(pk=created_order_item_id).delete()
+            if created_order_item_id is not None:
+                OrderItem.objects.filter(pk=created_order_item_id).delete()
         raise OrderPaymentError(
             "Payment provider configuration is invalid"
         ) from exc

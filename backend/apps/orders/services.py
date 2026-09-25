@@ -50,7 +50,7 @@ def create_direct_order(*, user, product: Product, email: str) -> Order:
         quantity=1,
         unit_price=total_price,
     )
-    order._prefetched_objects_cache = {"items": [item]}
+    order._prefetched_objects_cache = {"items": [item]}  # type: ignore[attr-defined]
     return order
 
 
@@ -78,7 +78,7 @@ def get_or_create_order_items_for_fulfilment(
     if order_items or order.source == Order.Source.CART:
         return order_items
 
-    if order.product_id is not None:
+    if order.product is not None:
         return [
             OrderItem.objects.create(
                 order=order,
@@ -568,7 +568,8 @@ def _pay_order(
                 locked_order = Order.objects.select_for_update().get(pk=order.pk)
                 locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
                 fail_payment(order=locked_order, payment=locked_payment)
-                OrderItem.objects.filter(pk=created_order_item_id).delete()
+                if created_order_item_id is not None:
+                    OrderItem.objects.filter(pk=created_order_item_id).delete()
             raise OrderPaymentError(
                 "Payment provider configuration is invalid"
             ) from exc
@@ -577,7 +578,8 @@ def _pay_order(
                 locked_order = Order.objects.select_for_update().get(pk=order.pk)
                 locked_payment = Payment.objects.select_for_update().get(pk=payment.pk)
                 fail_payment(order=locked_order, payment=locked_payment)
-                OrderItem.objects.filter(pk=created_order_item_id).delete()
+                if created_order_item_id is not None:
+                    OrderItem.objects.filter(pk=created_order_item_id).delete()
             raise OrderPaymentError(
                 "Payment provider could not confirm payment"
             ) from exc

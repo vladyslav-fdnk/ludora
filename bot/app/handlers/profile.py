@@ -7,7 +7,7 @@ from app.auth.service import TelegramAuthService
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_profile
 
-from .common import active_language, show_error
+from .common import active_language, edit_or_send, show_error
 
 router = Router(name="profile")
 
@@ -24,8 +24,7 @@ async def _show_profile(
         profile = await auth_service.get_profile(telegram_user)
         text = format_profile(profile, language, translator)
         if isinstance(event, CallbackQuery):
-            if event.message:
-                await event.message.edit_text(text)
+            await edit_or_send(event, text)
         else:
             await event.answer(text)
     except APIError as error:

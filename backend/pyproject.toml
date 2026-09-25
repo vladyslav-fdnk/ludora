@@ -18,7 +18,12 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "celery-types>=0.26.0",
+    "django-stubs[compatible-mypy]>=5.1",
+    "djangorestframework-stubs[compatible-mypy]>=3.15",
+    "mypy>=1.15",
     "pytest>=8.0",
+    "pytest-cov>=7.1.0",
     "pytest-django>=4.8",
     "ruff>=0.15.22",
 ]
@@ -38,3 +43,27 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "*/migrations/*.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["migrations/", "/tests/", "conftest\\.py$", "\\.venv/"]
+
+[[tool.mypy.overrides]]
+module = ["stripe.*", "django_filters.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.test_settings"
+
+[tool.coverage.run]
+branch = true
+source = ["apps", "config"]
+omit = ["*/migrations/*", "*/tests/*", "config/asgi.py", "config/wsgi.py"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

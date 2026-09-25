@@ -12,6 +12,9 @@ below summarize how the portfolio project evolved.
 
 ### Added
 
+- mypy with the Django and DRF plugins for backend application code and for
+  the bot, and branch coverage reporting with minimum thresholds in CI.
+
 - An idempotent `seed_demo` management command that loads a demo catalogue of
   platforms, categories, products, and fake license keys.
 
@@ -74,6 +77,8 @@ below summarize how the portfolio project evolved.
 
 ### Changed
 
+- Bot callback handlers send a new message when Telegram reports the original
+  message as inaccessible, instead of failing on `edit_text`.
 - Archived the ADR-001 implementation roadmap and phase design under
   `docs/architecture/archive/`, and removed the internal repository hygiene
   report and the unused `docker/postgres` placeholder.

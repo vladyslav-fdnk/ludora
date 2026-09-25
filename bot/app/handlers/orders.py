@@ -9,7 +9,7 @@ from app.keyboards.orders import orders_keyboard
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_order_detail, format_order_history
 
-from .common import active_language, show_error
+from .common import active_language, edit_or_send, show_error
 
 router = Router(name="orders")
 
@@ -32,8 +32,7 @@ async def _show_orders(
         )
         text = format_order_history(orders, language, translator)
         if isinstance(event, CallbackQuery):
-            if event.message:
-                await event.message.edit_text(text, reply_markup=markup)
+            await edit_or_send(event, text, reply_markup=markup)
         else:
             await event.answer(text, reply_markup=markup)
     except APIError as error:
@@ -77,24 +76,24 @@ async def order_detail(
         not callback.from_user
         or callback.from_user.id != callback_data.owner_id
     ):
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get("error.invalid_callback", language)
-            )
+        await edit_or_send(
+            callback,
+            translator.get("error.invalid_callback", language)
+        )
         return
     try:
         order = await auth_service.get_my_order(
             callback.from_user, callback_data.order_id
         )
-        if callback.message:
-            await callback.message.edit_text(
-                format_order_detail(order, language, translator)
-            )
+        await edit_or_send(
+            callback,
+            format_order_detail(order, language, translator)
+        )
     except ResourceNotFound:
-        if callback.message:
-            await callback.message.edit_text(
-                translator.get("orders.not_found", language)
-            )
+        await edit_or_send(
+            callback,
+            translator.get("orders.not_found", language)
+        )
     except APIError as error:
         await show_error(callback, error, language, translator)
     except Exception as error:
@@ -109,7 +108,7 @@ async def invalid_order_callback(
 ) -> None:
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
-    if callback.message:
-        await callback.message.edit_text(
-            translator.get("error.invalid_callback", language)
-        )
+    await edit_or_send(
+        callback,
+        translator.get("error.invalid_callback", language)
+    )

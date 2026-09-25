@@ -65,14 +65,25 @@ jobs:
       - name: Run Ruff checks
         run: uv run --frozen ruff check .
 
+      - name: Run mypy
+        run: uv run --frozen mypy .
+
       - name: Run Django system checks
         run: uv run --frozen python manage.py check
 
       - name: Check migration consistency
         run: uv run --frozen python manage.py makemigrations --check --dry-run
 
-      - name: Run backend tests
-        run: uv run --frozen pytest
+      - name: Run backend tests with coverage
+        run: uv run --frozen pytest --cov --cov-report=term --cov-fail-under=90
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          echo '### Backend coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          uv run --frozen coverage report --skip-covered | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   bot:
     name: Telegram bot
@@ -102,5 +113,16 @@ jobs:
       - name: Run Ruff checks
         run: uv run --frozen ruff check .
 
-      - name: Run bot tests
-        run: uv run --frozen pytest
+      - name: Run mypy
+        run: uv run --frozen mypy app
+
+      - name: Run bot tests with coverage
+        run: uv run --frozen pytest --cov --cov-report=term --cov-fail-under=75
+
+      - name: Publish coverage summary
+        if: always()
+        run: |
+          echo '### Bot coverage' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          uv run --frozen coverage report --skip-covered | tail -n 25 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

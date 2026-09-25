@@ -20,7 +20,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = (
+        fields: tuple[str, ...] = (
             "product",
             "product_title",
             "quantity",

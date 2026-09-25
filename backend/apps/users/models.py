@@ -3,7 +3,7 @@ from django.db import models
 from django.db.models.functions import Lower
 
 
-class UserManager(BaseUserManager):
+class UserManager(BaseUserManager["User"]):
     use_in_migrations = True
 
     def create_user(self, email, password=None, **extra_fields):
@@ -29,7 +29,7 @@ class UserManager(BaseUserManager):
 
 
 class User(AbstractUser):
-    username = None
+    username = None  # type: ignore[assignment]
     email = models.EmailField("email address", unique=True)
     telegram_id = models.PositiveBigIntegerField(
         unique=True,
@@ -43,7 +43,7 @@ class User(AbstractUser):
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
 
-    objects = UserManager()
+    objects = UserManager()  # type: ignore[misc,assignment]
 
     class Meta:
         constraints = [

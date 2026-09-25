@@ -1,3 +1,5 @@
+from typing import Literal
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.api.schemas import Cart
@@ -83,7 +85,9 @@ def cart_keyboard(
 def confirmation_keyboard(
     action: str, owner_id: int, language: str, translator: Translator
 ) -> InlineKeyboardMarkup:
-    confirmed = "clear_yes" if action == "clear" else "checkout_yes"
+    confirmed: Literal["clear_yes", "checkout_yes"] = (
+        "clear_yes" if action == "clear" else "checkout_yes"
+    )
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [

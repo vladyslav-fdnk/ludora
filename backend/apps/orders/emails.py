@@ -13,7 +13,7 @@ def assigned_license_key_values(order: Order) -> list[str]:
     ]
     if values:
         return values
-    if order.license_key_id is not None:
+    if order.license_key is not None:
         return [order.license_key.value]
     return []
 
@@ -36,7 +36,7 @@ def has_complete_fulfilment(order: Order) -> bool:
         )
     return (
         order.source == Order.Source.DIRECT
-        and order.license_key_id is not None
+        and order.license_key is not None
         and order.license_key.status == order.license_key.Status.SOLD
     )
 
@@ -47,7 +47,7 @@ def build_order_confirmation_email(order: Order) -> EmailMessage:
         f"- {item.product_title} × {item.quantity}"
         for item in order.items.all()
     ]
-    if not product_lines and order.product_id is not None:
+    if not product_lines and order.product is not None:
         product_lines = [f"- {order.product.title}"]
     license_key_lines = [
         f"- {value}" for value in assigned_license_key_values(order)
