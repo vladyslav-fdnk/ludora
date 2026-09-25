@@ -10,8 +10,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=1.15",
     "pytest>=8.3",
     "pytest-asyncio>=0.25",
+    "pytest-cov>=7.1.0",
     "ruff>=0.9",
 ]
 
@@ -31,3 +33,18 @@ select = ["E", "F", "I", "W", "UP"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.13"
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["\\.venv/"]
+
+[tool.coverage.run]
+branch = true
+source = ["app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

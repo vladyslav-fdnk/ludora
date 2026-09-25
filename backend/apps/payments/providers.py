@@ -19,7 +19,7 @@ class PaymentProviderStatus(StrEnum):
 @dataclass(frozen=True)
 class CreatePaymentRequest:
     amount: Decimal
-    order_number: str
+    order_number: str | None
     idempotency_key: str
     local_payment_id: int | str | None = None
 

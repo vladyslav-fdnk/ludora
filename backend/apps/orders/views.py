@@ -1,3 +1,5 @@
+from typing import cast
+
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -16,9 +18,10 @@ from apps.orders.serializers import (
     OrderSerializer,
 )
 from apps.orders.services import pay_order
+from apps.users.models import User
 
 
-class OrderVisibilityMixin:
+class OrderVisibilityMixin(generics.GenericAPIView):
     def get_queryset(self):
         if getattr(self, "swagger_fake_view", False):
             return Order.objects.none()
@@ -27,9 +30,10 @@ class OrderVisibilityMixin:
             "-created_at",
             "-id",
         )
-        if self.request.user.is_staff:
+        user = cast(User, self.request.user)  # views using this require authentication
+        if user.is_staff:
             return queryset
-        return queryset.filter(user=self.request.user)
+        return queryset.filter(user=user)
 
 
 class OrderListCreateAPIView(OrderVisibilityMixin, generics.ListCreateAPIView):
@@ -44,10 +48,8 @@ class OrderListCreateAPIView(OrderVisibilityMixin, generics.ListCreateAPIView):
         return OrderSerializer
 
     def perform_create(self, serializer):
-        serializer.save(
-            user=self.request.user,
-            email=self.request.user.email,
-        )
+        user = cast(User, self.request.user)  # guaranteed by IsAuthenticated
+        serializer.save(user=user, email=user.email)
 
     @extend_schema(
         responses={

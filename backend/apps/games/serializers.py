@@ -16,7 +16,7 @@ class CategorySerializer(serializers.ModelSerializer):
 
 
 class ProductListSerializer(serializers.ModelSerializer):
-    platform = serializers.StringRelatedField()
+    platform: "serializers.StringRelatedField[Platform]" = serializers.StringRelatedField()
 
     class Meta:
         model = Product
@@ -31,8 +31,10 @@ class ProductListSerializer(serializers.ModelSerializer):
 
 
 class ProductDetailSerializer(serializers.ModelSerializer):
-    platform = serializers.StringRelatedField()
-    categories = serializers.StringRelatedField(many=True)
+    platform: "serializers.StringRelatedField[Platform]" = serializers.StringRelatedField()
+    categories: "serializers.StringRelatedField[Category]" = serializers.StringRelatedField(
+        many=True
+    )
 
     class Meta:
         model = Product

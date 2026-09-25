@@ -1,12 +1,12 @@
 from django.contrib import admin, messages
 from django.contrib.admin.actions import delete_selected as admin_delete_selected
+from django.contrib.admin.utils import unquote
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import Count, Q
 from django.http import HttpResponseRedirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
-from django.utils.http import unquote
 
 from apps.games.forms import LicenseKeyCSVImportForm
 from apps.games.models import Category, LicenseKey, Platform, Product
@@ -124,7 +124,7 @@ class ProductAdmin(admin.ModelAdmin):
     def import_license_keys_view(self, request, object_id):
         product = self.get_object(request, unquote(object_id))
         if product is None:
-            return self._get_obj_does_not_exist_redirect(
+            return self._get_obj_does_not_exist_redirect(  # type: ignore[attr-defined]
                 request,
                 Product._meta,
                 object_id,
