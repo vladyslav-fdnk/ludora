@@ -12,6 +12,12 @@ below summarize how the portfolio project evolved.
 
 ### Added
 
+- A production-like Compose topology (`docker-compose.prod.yml`) with gunicorn,
+  nginx serving static and media files, a one-shot migration step, health
+  checks, and images built without development dependencies.
+- `DJANGO_CSRF_TRUSTED_ORIGINS`, `DJANGO_BEHIND_HTTPS_PROXY`, and configurable
+  static and media roots.
+
 - A Django REST API backed by PostgreSQL for the catalogue, accounts, carts,
   orders, and payments.
 - A catalogue of games, DLC, subscriptions, gift cards, and software, organized

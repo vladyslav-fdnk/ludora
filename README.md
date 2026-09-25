@@ -31,7 +31,7 @@ and unreliable external systems, not CRUD volume.
   catalogue changes never rewrite purchase history.
 - **Thin Telegram client.** The bot talks only to the public API, with no
   database access, and supports English and Russian.
-- **Tested against real PostgreSQL.** About 350 backend and bot tests, plus
+- **Tested against real PostgreSQL.** About 400 backend and bot tests, plus
   Ruff, Django system checks, and migration-drift checks, run in GitHub Actions
   on every push and pull request.
 
@@ -137,6 +137,33 @@ bind-mounts source, and does not include TLS or a reverse proxy.
 To stop containers, run `docker compose down`. Add `--volumes` only when you
 intentionally want to delete the local PostgreSQL data volume.
 
+## Production deployment
+
+`docker-compose.prod.yml` is a production-like topology: gunicorn behind nginx,
+images built without test tooling, no source bind mounts, and no published
+database port. A one-shot `migrate` service applies migrations and collects
+static files before the backend, worker, and bot start.
+
+```bash
+cp .env.example .env   # set real secrets and the variables below
+docker compose -f docker-compose.prod.yml up -d --build
+# include the Telegram bot:
+docker compose -f docker-compose.prod.yml --profile bot up -d --build
+```
+
+Set at least:
+
+- `DJANGO_ALLOWED_HOSTS` — your domain plus `backend` and `localhost`, which the
+  bot and the container health check use internally.
+- `DJANGO_CSRF_TRUSTED_ORIGINS` — for example `https://shop.example.com`, so
+  Django Admin works over HTTPS.
+- `DJANGO_BEHIND_HTTPS_PROXY=True` when TLS is terminated in front of nginx.
+- `HTTP_PORT` (default `80`) and `GUNICORN_WORKERS` (default `3`) if needed.
+
+nginx serves `/static/` and `/media/` from volumes and proxies everything else
+to gunicorn. TLS is expected in front of nginx: a cloud load balancer, Caddy, or
+certbot on the host. See [docker/nginx](docker/nginx/README.md).
+
 ## Local development without Docker
 
 PostgreSQL is required for the backend; SQLite is not a supported substitute
@@ -176,6 +203,9 @@ Copy `.env.example` to `.env`. Boolean values are case-sensitive and must be
 | `DJANGO_SECRET_KEY` | insecure code fallback | Django signing and JWT key; set a strong value |
 | `DJANGO_DEBUG` | `False` | Enable Django debug mode |
 | `DJANGO_ALLOWED_HOSTS` | empty / local hosts in example | Comma-separated hosts |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated origins, e.g. `https://shop.example.com` |
+| `DJANGO_BEHIND_HTTPS_PROXY` | `False` | Trust `X-Forwarded-Proto` and use secure cookies |
+| `DJANGO_STATIC_ROOT`, `DJANGO_MEDIA_ROOT` | `backend/staticfiles`, `backend/media` | Collected static and uploaded media paths |
 | `POSTGRES_DB` | `ludora_store` / `game_key_store` | Database name |
 | `POSTGRES_USER` | `ludora_store` / `game_key_store` | Database user |
 | `POSTGRES_PASSWORD` | empty / placeholder | Database password |
@@ -290,8 +320,9 @@ ludora/
 │   ├── API.md                  # endpoint and payment integration guide
 │   ├── ARCHITECTURE.md         # architecture and lifecycle guarantees
 │   └── REPOSITORY_HYGIENE.md   # review findings and follow-up work
-├── docker/                     # reserved service-specific configuration
+├── docker/nginx/               # reverse proxy configuration
 ├── docker-compose.yml          # local development topology
+├── docker-compose.prod.yml     # gunicorn + nginx production topology
 ├── .env.example               # configuration template
 └── .github/workflows/tests.yml # CI checks
 ```
@@ -300,9 +331,8 @@ ludora/
 
 The core purchase flow is complete and covered by tests. Known limitations:
 
-- The Compose file is a development topology. A production deployment still
-  needs a WSGI server, a reverse proxy with TLS, static file serving, and
-  secret management.
+- The production Compose file does not manage TLS certificates, secrets, or
+  database backups; these belong to the hosting environment.
 - Stripe completion is webhook-driven only. The synchronous `/pay/` command is
   supported for the local provider.
 

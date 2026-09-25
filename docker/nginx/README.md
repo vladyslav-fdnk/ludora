@@ -1,7 +1,24 @@
 # docker/nginx
 
-Reserved for a future reverse proxy in front of the Django backend, for
-example an `nginx.conf`, TLS termination, and static/media file serving.
+Reverse proxy configuration used by `docker-compose.prod.yml`.
 
-It is not used by `docker-compose.yml`. The current Compose file is a local
-development topology and exposes Django's development server directly.
+`nginx.conf`:
+
+- serves collected static files from `/srv/static/` and uploaded media from
+  `/srv/media/` (shared Docker volumes);
+- proxies all other requests to gunicorn at `backend:8000`, resolving the
+  backend through Docker's DNS so a recreated backend container is picked up
+  without restarting nginx;
+- forwards `X-Forwarded-Proto`, keeping the original scheme when TLS is
+  terminated in front of nginx.
+
+nginx listens on plain HTTP. Terminate TLS in front of it (a cloud load
+balancer, Caddy, or certbot on the host) and set
+`DJANGO_BEHIND_HTTPS_PROXY=True`.
+
+The development `docker-compose.yml` does not use nginx; it exposes Django's
+development server directly.
+
+---
+
+_README written with the assistance of Claude (Anthropic)._
