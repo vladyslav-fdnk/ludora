@@ -1,4 +1,4 @@
-"""ASGI config for the Game Key Store backend."""
+"""ASGI config for the Ludora backend."""
 
 import os
 

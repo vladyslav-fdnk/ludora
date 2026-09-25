@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Telegram Game Key Store — Django backend"
+description = "Ludora digital-product marketplace — Django backend"
 requires-python = ">=3.13"
 dependencies = [
     "django>=5.1,<6.0",

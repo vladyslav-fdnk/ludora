@@ -227,8 +227,8 @@ Copy `.env.example` to `.env`. Boolean values are case-sensitive and must be
 | `DJANGO_NUM_PROXIES` | `0` (`1` in production Compose) | Trusted reverse proxies in front of Django, used to find the client IP |
 | `DJANGO_CACHE_URL` | empty (in-memory) / Redis in production Compose | Shared cache for rate-limit counters |
 | `DJANGO_STATIC_ROOT`, `DJANGO_MEDIA_ROOT` | `backend/staticfiles`, `backend/media` | Collected static and uploaded media paths |
-| `POSTGRES_DB` | `ludora_store` / `game_key_store` | Database name |
-| `POSTGRES_USER` | `ludora_store` / `game_key_store` | Database user |
+| `POSTGRES_DB` | `ludora_store` | Database name |
+| `POSTGRES_USER` | `ludora_store` | Database user |
 | `POSTGRES_PASSWORD` | empty / placeholder | Database password |
 | `POSTGRES_HOST` | `localhost` / `postgres` | Database host |
 | `POSTGRES_PORT` | `5432` | Database port inside the selected network |
