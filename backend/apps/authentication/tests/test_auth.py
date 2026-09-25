@@ -281,7 +281,7 @@ class TelegramAuthenticationTests(APITestCase):
             "telegram_id": 123456789,
             "username": "vlad",
             "first_name": "Vladyslav",
-            "last_name": "Fedchenko",
+            "last_name": "Tester",
             "language_code": "ru",
         }
         value.update(overrides)
