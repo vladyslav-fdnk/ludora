@@ -12,6 +12,9 @@ below summarize how the portfolio project evolved.
 
 ### Added
 
+- An idempotent `seed_demo` management command that loads a demo catalogue of
+  platforms, categories, products, and fake license keys.
+
 - A production-like Compose topology (`docker-compose.prod.yml`) with gunicorn,
   nginx serving static and media files, a one-shot migration step, health
   checks, and images built without development dependencies.
