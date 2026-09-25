@@ -1,9 +1,39 @@
 # Ludora
 
+[![CI](https://github.com/vladyslav-fdnk/ludora/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/vladyslav-fdnk/ludora/actions/workflows/tests.yml)
+![Python](https://img.shields.io/badge/python-3.13-blue)
+![Django](https://img.shields.io/badge/django-5.x-green)
+[![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
+
 Ludora is a digital-product marketplace built as a Django modular monolith with
 an aiogram Telegram client. It provides a public catalogue, JWT authentication,
 persistent carts, immutable order snapshots, license-key fulfilment, local
 payment simulation, Stripe Checkout, and signed Stripe webhooks.
+
+## Engineering highlights
+
+The focus of the project is correctness of the purchase flow under concurrency
+and unreliable external systems, not CRUD volume.
+
+- **No overselling.** Checkout reserves license keys for the whole order under
+  PostgreSQL row locks (`select_for_update`) before a payment is exposed to the
+  customer. Database constraints back the invariants in the service layer.
+- **Idempotent, order-tolerant webhooks.** Stripe events are signature-verified,
+  deduplicated by event ID, and safe to receive twice or out of order.
+- **Payment attempt ownership.** An order names the single payment attempt
+  allowed to finalize or release its reservation, so a stale or superseded
+  payment can never fulfil or cancel a newer one
+  ([ADR-001](docs/architecture/ADR-001-license-reservation.md)).
+- **Clean transaction boundaries.** External provider calls run outside
+  database transactions; confirmation email is queued to Celery only after
+  commit.
+- **Immutable order snapshots.** Prices and items are copied at checkout, so
+  catalogue changes never rewrite purchase history.
+- **Thin Telegram client.** The bot talks only to the public API, with no
+  database access, and supports English and Russian.
+- **Tested against real PostgreSQL.** About 350 backend and bot tests, plus
+  Ruff, Django system checks, and migration-drift checks, run in GitHub Actions
+  on every push and pull request.
 
 ## Stack
 
@@ -266,5 +296,19 @@ ludora/
 └── .github/workflows/tests.yml # CI checks
 ```
 
-See [Repository hygiene](docs/REPOSITORY_HYGIENE.md) for the current static
-review, deliberate compatibility fields, and non-production limitations.
+## Status and limitations
+
+The core purchase flow is complete and covered by tests. Known limitations:
+
+- The Compose file is a development topology. A production deployment still
+  needs a WSGI server, a reverse proxy with TLS, static file serving, and
+  secret management.
+- Stripe completion is webhook-driven only. The synchronous `/pay/` command is
+  supported for the local provider.
+
+See [Repository hygiene](docs/REPOSITORY_HYGIENE.md) for deliberate
+compatibility fields and planned cleanup.
+
+---
+
+_README written with the assistance of Claude (Anthropic)._
