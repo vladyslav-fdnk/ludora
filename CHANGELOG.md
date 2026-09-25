@@ -74,6 +74,9 @@ below summarize how the portfolio project evolved.
 
 ### Changed
 
+- Archived the ADR-001 implementation roadmap and phase design under
+  `docs/architecture/archive/`, and removed the internal repository hygiene
+  report and the unused `docker/postgres` placeholder.
 - Payment creation and direct-order confirmation now orchestrate through the
   provider boundary while preserving endpoint payloads, transactional
   fulfilment, retry rules, and post-commit email dispatch.

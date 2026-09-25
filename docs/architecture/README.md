@@ -8,8 +8,8 @@ of why the system is designed as it is.
 
 - [ADR-001 — License Reservation Architecture](ADR-001-license-reservation.md)
 
-## Implementation Plans
+Implementation notes for completed ADRs are kept in the [archive](archive/).
 
-- [ADR-001 Implementation Roadmap](IMPLEMENTATION_ROADMAP.md)
+---
 
-Future ADRs will be added to this index.
+_README written with the assistance of Claude (Anthropic)._
