@@ -1,13 +1,11 @@
 from django.urls import path
-from rest_framework_simplejwt.views import (
-    TokenRefreshView,
-)
 
 from .views import (
     EmailTokenObtainPairView,
     MeAPIView,
     RegisterAPIView,
     TelegramAuthenticationAPIView,
+    ThrottledTokenRefreshView,
 )
 
 urlpatterns = [
@@ -23,7 +21,7 @@ urlpatterns = [
     ),
     path(
         "token/refresh/",
-        TokenRefreshView.as_view(),
+        ThrottledTokenRefreshView.as_view(),
         name="token-refresh",
     ),
     # Compatibility aliases used by the existing Telegram client.
@@ -34,7 +32,7 @@ urlpatterns = [
     ),
     path(
         "refresh/",
-        TokenRefreshView.as_view(),
+        ThrottledTokenRefreshView.as_view(),
         name="refresh",
     ),
     path(

@@ -17,7 +17,9 @@ and unreliable external systems, not CRUD volume.
 
 - **No overselling.** Checkout reserves license keys for the whole order under
   PostgreSQL row locks (`select_for_update`) before a payment is exposed to the
-  customer. Database constraints back the invariants in the service layer.
+  customer. Database constraints back the invariants in the service layer, and
+  multi-threaded tests race real transactions against each other (for example,
+  two orders competing for the last key) to prove only one can win.
 - **Idempotent, order-tolerant webhooks.** Stripe events are signature-verified,
   deduplicated by event ID, and safe to receive twice or out of order.
 - **Payment attempt ownership.** An order names the single payment attempt
@@ -29,6 +31,9 @@ and unreliable external systems, not CRUD volume.
   commit.
 - **Immutable order snapshots.** Prices and items are copied at checkout, so
   catalogue changes never rewrite purchase history.
+- **Brute-force protection.** Registration, login, and token refresh are rate
+  limited per client IP, with counters shared in Redis across gunicorn workers
+  and the client IP taken only from trusted proxy hops.
 - **Thin Telegram client.** The bot talks only to the public API, with no
   database access, and supports English and Russian.
 - **Tested against real PostgreSQL.** About 400 backend and bot tests (94%
@@ -166,7 +171,8 @@ Set at least:
   bot and the container health check use internally.
 - `DJANGO_CSRF_TRUSTED_ORIGINS` — for example `https://shop.example.com`, so
   Django Admin works over HTTPS.
-- `DJANGO_BEHIND_HTTPS_PROXY=True` when TLS is terminated in front of nginx.
+- `DJANGO_BEHIND_HTTPS_PROXY=True` when TLS is terminated in front of nginx,
+  and `DJANGO_NUM_PROXIES=2` so rate limiting sees the real client IP.
 - `HTTP_PORT` (default `80`) and `GUNICORN_WORKERS` (default `3`) if needed.
 
 For a demo deployment, load the sample catalogue with
@@ -217,6 +223,9 @@ Copy `.env.example` to `.env`. Boolean values are case-sensitive and must be
 | `DJANGO_ALLOWED_HOSTS` | empty / local hosts in example | Comma-separated hosts |
 | `DJANGO_CSRF_TRUSTED_ORIGINS` | empty | Comma-separated origins, e.g. `https://shop.example.com` |
 | `DJANGO_BEHIND_HTTPS_PROXY` | `False` | Trust `X-Forwarded-Proto` and use secure cookies |
+| `DJANGO_AUTH_THROTTLE_RATE` | `10/minute` | Per-IP limit for register, login, and token refresh |
+| `DJANGO_NUM_PROXIES` | `0` (`1` in production Compose) | Trusted reverse proxies in front of Django, used to find the client IP |
+| `DJANGO_CACHE_URL` | empty (in-memory) / Redis in production Compose | Shared cache for rate-limit counters |
 | `DJANGO_STATIC_ROOT`, `DJANGO_MEDIA_ROOT` | `backend/staticfiles`, `backend/media` | Collected static and uploaded media paths |
 | `POSTGRES_DB` | `ludora_store` / `game_key_store` | Database name |
 | `POSTGRES_USER` | `ludora_store` / `game_key_store` | Database user |

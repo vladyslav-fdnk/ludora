@@ -1,7 +1,16 @@
 """Suite-wide safety guards for backend tests."""
 
 import pytest
+from django.core.cache import cache
 from stripe import _http_client
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """Reset throttle counters so rate limits never leak between tests."""
+    cache.clear()
+    yield
+    cache.clear()
 
 
 @pytest.fixture(autouse=True)

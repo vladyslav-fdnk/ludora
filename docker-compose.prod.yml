@@ -15,6 +15,10 @@ x-backend: &backend
   env_file: .env
   environment:
     CELERY_BROKER_URL: redis://redis:6379/0
+    # Shared cache for rate-limit counters across gunicorn workers.
+    DJANGO_CACHE_URL: redis://redis:6379/1
+    # nginx is the one trusted proxy; raise this if TLS terminates in front of it.
+    DJANGO_NUM_PROXIES: ${DJANGO_NUM_PROXIES:-1}
     DJANGO_STATIC_ROOT: /srv/static
     DJANGO_MEDIA_ROOT: /srv/media
     UV_NO_SYNC: "1"
@@ -68,6 +72,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      redis:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD

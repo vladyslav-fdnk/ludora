@@ -12,6 +12,9 @@ below summarize how the portfolio project evolved.
 
 ### Added
 
+- Per-IP rate limiting for registration, login, and token refresh, with
+  proxy-aware client IP detection and Redis-backed counters in production.
+
 - mypy with the Django and DRF plugins for backend application code and for
   the bot, and branch coverage reporting with minimum thresholds in CI.
 
