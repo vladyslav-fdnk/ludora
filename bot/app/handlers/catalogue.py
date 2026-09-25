@@ -9,7 +9,7 @@ from app.keyboards.catalogue import catalogue_keyboard, product_keyboard
 from app.localization import LanguagePreferences, Translator
 from app.presentation import format_catalogue, format_product
 
-from .common import active_language, show_error
+from .common import active_language, edit_or_send, show_error
 
 router = Router(name="catalogue")
 
@@ -48,20 +48,18 @@ async def catalogue_page(
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
     if callback_data.page < 1:
-        if callback.message:
-            await callback.message.edit_text(translator.get("error.invalid_callback", language))
+        await edit_or_send(callback, translator.get("error.invalid_callback", language))
         return
     try:
         page = await api_client.get_products(callback_data.page)
         if not page.products:
-            if callback.message:
-                await callback.message.edit_text(translator.get("catalogue.empty", language))
+            await edit_or_send(callback, translator.get("catalogue.empty", language))
             return
-        if callback.message:
-            await callback.message.edit_text(
-                format_catalogue(page, language, translator),
-                reply_markup=catalogue_keyboard(page, language, translator),
-            )
+        await edit_or_send(
+            callback,
+            format_catalogue(page, language, translator),
+            reply_markup=catalogue_keyboard(page, language, translator),
+        )
     except APIError as error:
         await show_error(callback, error, language, translator)
     except Exception as error:
@@ -79,18 +77,17 @@ async def product_detail(
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
     if callback_data.product_id < 1 or callback_data.page < 1:
-        if callback.message:
-            await callback.message.edit_text(translator.get("error.invalid_callback", language))
+        await edit_or_send(callback, translator.get("error.invalid_callback", language))
         return
     try:
         product = await api_client.get_product(callback_data.product_id)
-        if callback.message:
-            await callback.message.edit_text(
-                format_product(product, language, translator),
-                reply_markup=product_keyboard(
-                    callback_data.page, language, translator, product.id
-                ),
-            )
+        await edit_or_send(
+            callback,
+            format_product(product, language, translator),
+            reply_markup=product_keyboard(
+                callback_data.page, language, translator, product.id
+            ),
+        )
     except APIError as error:
         await show_error(callback, error, language, translator)
     except Exception as error:
@@ -105,5 +102,4 @@ async def invalid_structured_callback(
 ) -> None:
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
-    if callback.message:
-        await callback.message.edit_text(translator.get("error.invalid_callback", language))
+    await edit_or_send(callback, translator.get("error.invalid_callback", language))

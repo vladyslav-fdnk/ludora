@@ -1,6 +1,13 @@
 import logging
+from typing import cast
 
-from aiogram.types import CallbackQuery, Message, User
+from aiogram.types import (
+    CallbackQuery,
+    InaccessibleMessage,
+    InlineKeyboardMarkup,
+    Message,
+    User,
+)
 
 from app.api.exceptions import (
     AuthenticationFailed,
@@ -26,6 +33,27 @@ def active_language(user: User | None, preferences: LanguagePreferences) -> str:
         user.id if user else None,
         user.language_code if user else None,
     )
+
+
+async def edit_or_send(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    """Replace the callback's message text, or send a new message.
+
+    Telegram stops allowing edits of old messages and then delivers them as
+    ``InaccessibleMessage``, which has no ``edit_text``. In that case the reply
+    is sent as a new message to the same chat instead of failing the handler.
+    """
+    message = callback.message
+    if not message:
+        return
+    if isinstance(message, InaccessibleMessage):
+        if callback.bot is not None:
+            await callback.bot.send_message(message.chat.id, text, reply_markup=reply_markup)
+        return
+    await message.edit_text(text, reply_markup=reply_markup)
 
 
 def error_key(error: Exception) -> str:
@@ -69,8 +97,6 @@ async def show_error(
         logger.warning("Expected bot API failure: %s", type(error).__name__)
     text = translator.get(error_key(error), language)
     if isinstance(event, CallbackQuery) or hasattr(event, "message"):
-        callback_message = getattr(event, "message", None)
-        if callback_message:
-            await callback_message.edit_text(text)
+        await edit_or_send(cast(CallbackQuery, event), text)
     else:
         await event.answer(text)

@@ -9,7 +9,7 @@ from app.keyboards.catalogue import language_keyboard
 from app.keyboards.menu import main_menu
 from app.localization import LanguagePreferences, Translator
 
-from .common import active_language, show_error
+from .common import active_language, edit_or_send, show_error
 
 router = Router(name="start")
 
@@ -42,11 +42,11 @@ async def choose_language(
 ) -> None:
     await callback.answer()
     language = active_language(callback.from_user, language_preferences)
-    if callback.message:
-        await callback.message.edit_text(
-            translator.get("language.choose", language),
-            reply_markup=language_keyboard(),
-        )
+    await edit_or_send(
+        callback,
+        translator.get("language.choose", language),
+        reply_markup=language_keyboard(),
+    )
 
 
 @router.callback_query(LanguageCallback.filter())
@@ -61,16 +61,15 @@ async def select_language(
         language = language_preferences.set(callback.from_user.id, callback_data.language)
     except ValueError:
         language = active_language(callback.from_user, language_preferences)
-        if callback.message:
-            await callback.message.edit_text(translator.get("error.invalid_callback", language))
+        await edit_or_send(callback, translator.get("error.invalid_callback", language))
         return
-    if callback.message:
-        await callback.message.edit_text(
-            "\n\n".join(
-                [
-                    translator.get("language.changed", language),
-                    translator.get("welcome", language),
-                ]
-            ),
-            reply_markup=main_menu(language, translator),
-        )
+    await edit_or_send(
+        callback,
+        "\n\n".join(
+            [
+                translator.get("language.changed", language),
+                translator.get("welcome", language),
+            ]
+        ),
+        reply_markup=main_menu(language, translator),
+    )
