@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from hmac import compare_digest
 
 from django.conf import settings
@@ -10,9 +11,10 @@ from rest_framework.generics import (
 )
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import BaseThrottle, ScopedRateThrottle
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from .serializers import (
     EmailTokenObtainPairSerializer,
@@ -25,7 +27,14 @@ from .serializers import (
 User = get_user_model()
 
 
-class RegisterAPIView(CreateAPIView):
+class AuthRateThrottleMixin:
+    """Limit credential endpoints per client IP to slow brute-force attempts."""
+
+    throttle_classes: Sequence[type[BaseThrottle]] = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+
+class RegisterAPIView(AuthRateThrottleMixin, CreateAPIView):
     queryset = User.objects.all()
     serializer_class = RegisterSerializer
 
@@ -40,8 +49,12 @@ class MeAPIView(RetrieveAPIView):
         return self.request.user
 
 
-class EmailTokenObtainPairView(TokenObtainPairView):
+class EmailTokenObtainPairView(AuthRateThrottleMixin, TokenObtainPairView):
     serializer_class = EmailTokenObtainPairSerializer
+
+
+class ThrottledTokenRefreshView(AuthRateThrottleMixin, TokenRefreshView):
+    pass
 
 
 class TelegramAuthenticationAPIView(APIView):

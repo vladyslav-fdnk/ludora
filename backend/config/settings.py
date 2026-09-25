@@ -153,7 +153,25 @@ REST_FRAMEWORK = {
     ),
 
     "PAGE_SIZE": 10,
+
+    "DEFAULT_THROTTLE_RATES": {
+        "auth": os.getenv("DJANGO_AUTH_THROTTLE_RATE", "10/minute"),
+    },
+    # Number of trusted reverse proxies in front of Django. Throttling reads the
+    # client IP from X-Forwarded-For only this many hops back, so clients cannot
+    # spoof it; 0 uses REMOTE_ADDR directly.
+    "NUM_PROXIES": int(os.getenv("DJANGO_NUM_PROXIES", "0")),
 }
+
+# Throttle counters must be shared by all worker processes, so production uses
+# Redis. Without DJANGO_CACHE_URL each process keeps its own in-memory cache.
+if cache_url := os.getenv("DJANGO_CACHE_URL"):
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": cache_url,
+        }
+    }
 
 
 SPECTACULAR_SETTINGS = {

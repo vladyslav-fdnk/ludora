@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.test import override_settings
@@ -360,3 +361,76 @@ class TelegramAuthenticationTests(APITestCase):
         self.assertIn("telegram_id", properties)
         self.assertNotIn("password", properties)
         self.assertNotIn("access", properties)
+
+
+AUTH_RATE_LIMIT = 10
+
+
+class AuthThrottlingTests(APITestCase):
+    def login(self, **extra):
+        return self.client.post(
+            "/api/auth/token/",
+            {"email": "nobody@test.com", "password": "wrong-password"},
+            format="json",
+            **extra,
+        )
+
+    def test_login_is_rate_limited_per_client_ip(self):
+        responses = [self.login() for _ in range(AUTH_RATE_LIMIT + 1)]
+
+        self.assertTrue(
+            all(r.status_code == status.HTTP_401_UNAUTHORIZED for r in responses[:-1])
+        )
+        self.assertEqual(responses[-1].status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertIn("Retry-After", responses[-1].headers)
+
+    def test_other_client_ip_has_its_own_budget(self):
+        for _ in range(AUTH_RATE_LIMIT + 1):
+            self.login(REMOTE_ADDR="10.0.0.1")
+
+        response = self.login(REMOTE_ADDR="10.0.0.2")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_registration_and_refresh_share_the_auth_budget(self):
+        for _ in range(AUTH_RATE_LIMIT):
+            self.login()
+
+        register = self.client.post("/api/auth/register/", {}, format="json")
+        refresh = self.client.post("/api/auth/token/refresh/", {}, format="json")
+
+        self.assertEqual(register.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+        self.assertEqual(refresh.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    @override_settings(BOT_INTERNAL_SECRET="test-placeholder-secret")
+    def test_telegram_authentication_is_not_rate_limited(self):
+        for _ in range(AUTH_RATE_LIMIT):
+            self.login()
+
+        response = self.client.post(
+            "/api/auth/telegram/",
+            {"telegram_id": 42, "username": "bot_user"},
+            format="json",
+            HTTP_X_BOT_INTERNAL_SECRET="test-placeholder-secret",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_behind_proxy_the_forwarded_client_ip_is_used(self):
+        rest_framework = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}
+        with override_settings(REST_FRAMEWORK=rest_framework):
+            for _ in range(AUTH_RATE_LIMIT + 1):
+                self.login(REMOTE_ADDR="172.18.0.5", HTTP_X_FORWARDED_FOR="203.0.113.1")
+
+            other_client = self.login(
+                REMOTE_ADDR="172.18.0.5", HTTP_X_FORWARDED_FOR="203.0.113.2"
+            )
+            spoofed = self.login(
+                REMOTE_ADDR="172.18.0.5",
+                HTTP_X_FORWARDED_FOR="203.0.113.2, 203.0.113.1",
+            )
+
+        self.assertEqual(other_client.status_code, status.HTTP_401_UNAUTHORIZED)
+        # With one trusted proxy only the last hop counts, so a client cannot
+        # escape its limit by prepending fake addresses.
+        self.assertEqual(spoofed.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
