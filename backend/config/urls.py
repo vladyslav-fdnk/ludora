@@ -6,8 +6,7 @@ from drf_spectacular.views import (
 )
 
 urlpatterns = [
-    path("admin/", admin.site.urls),  # ← добавить
-
+    path("admin/", admin.site.urls),
     path("api/", include("apps.games.urls")),
     path("api/cart/", include("apps.carts.urls")),
     path("api/orders/", include("apps.orders.urls")),

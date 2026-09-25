@@ -1,0 +1,125 @@
+# Production-like topology: gunicorn behind nginx, no source bind mounts,
+# no published database port, and images built without test tooling.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# TLS is expected to be terminated in front of nginx (a load balancer, Caddy,
+# or certbot on the host). See README "Production deployment".
+
+x-backend: &backend
+  build:
+    context: ./backend
+    args:
+      UV_SYNC_FLAGS: --no-dev
+  image: ludora-backend:prod
+  env_file: .env
+  environment:
+    CELERY_BROKER_URL: redis://redis:6379/0
+    DJANGO_STATIC_ROOT: /srv/static
+    DJANGO_MEDIA_ROOT: /srv/media
+    UV_NO_SYNC: "1"
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # One-shot release step: apply migrations and collect static files.
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: >-
+      sh -c "uv run python manage.py migrate --noinput
+      && uv run python manage.py collectstatic --noinput"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - static_files:/srv/static
+
+  backend:
+    <<: *backend
+    command:
+      - uv
+      - run
+      - gunicorn
+      - config.wsgi:application
+      - --bind=0.0.0.0:8000
+      - --workers=${GUNICORN_WORKERS:-3}
+      - --access-logfile=-
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/admin/login/', timeout=5)"
+      interval: 10s
+      timeout: 6s
+      retries: 5
+    volumes:
+      - media_files:/srv/media
+
+  celery_worker:
+    <<: *backend
+    command: ["uv", "run", "celery", "-A", "config", "worker", "--loglevel=INFO"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  bot:
+    build:
+      context: ./bot
+      args:
+        UV_SYNC_FLAGS: --no-dev
+    image: ludora-bot:prod
+    command: ["uv", "run", "python", "-m", "app.main"]
+    env_file: .env
+    environment:
+      BOT_BACKEND_BASE_URL: http://backend:8000
+      UV_NO_SYNC: "1"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    profiles: ["bot"]
+
+  nginx:
+    image: nginx:1.29-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files:/srv/static:ro
+      - media_files:/srv/media:ro
+
+volumes:
+  postgres_data:
+  static_files:
+  media_files:

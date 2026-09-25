@@ -40,6 +40,14 @@ def get_list_env(name: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 ALLOWED_HOSTS = get_list_env("DJANGO_ALLOWED_HOSTS")
+CSRF_TRUSTED_ORIGINS = get_list_env("DJANGO_CSRF_TRUSTED_ORIGINS")
+
+# Behind a TLS-terminating reverse proxy, trust its X-Forwarded-Proto header
+# and mark cookies secure. Leave disabled for plain-HTTP local development.
+if os.getenv("DJANGO_BEHIND_HTTPS_PROXY", "False") == "True":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 INSTALLED_APPS = [
     # Third-party apps
@@ -117,6 +125,9 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+STATIC_ROOT = Path(os.getenv("DJANGO_STATIC_ROOT", BASE_DIR / "staticfiles"))
+MEDIA_URL = "media/"
+MEDIA_ROOT = Path(os.getenv("DJANGO_MEDIA_ROOT", BASE_DIR / "media"))
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
