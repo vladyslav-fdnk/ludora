@@ -1,7 +1,7 @@
 [project]
 name = "bot"
 version = "0.1.0"
-description = "Telegram Game Key Store — Aiogram bot"
+description = "Ludora digital-product marketplace — aiogram Telegram bot"
 requires-python = ">=3.13"
 dependencies = [
     "aiogram>=3.13",

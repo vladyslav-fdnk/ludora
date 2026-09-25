@@ -38,7 +38,9 @@ def test_seed_demo_is_idempotent():
 def test_seed_demo_tops_up_only_available_keys():
     seed(keys_per_product=2)
     product = Product.objects.get(slug=PRODUCTS[0][0])
-    product.license_keys.filter(pk=product.license_keys.first().pk).update(
+    sold_key = product.license_keys.first()
+    assert sold_key is not None
+    product.license_keys.filter(pk=sold_key.pk).update(
         status=LicenseKey.Status.SOLD
     )
 

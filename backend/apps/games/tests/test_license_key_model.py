@@ -5,6 +5,9 @@ from apps.games.models import LicenseKey, Platform, Product
 
 
 class LicenseKeyModelTests(TestCase):
+    product: Product
+    other_product: Product
+
     @classmethod
     def setUpTestData(cls):
         platform = Platform.objects.create(name="Steam", slug="steam")

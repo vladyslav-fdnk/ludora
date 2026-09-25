@@ -1,4 +1,4 @@
-"""WSGI config for the Game Key Store backend."""
+"""WSGI config for the Ludora backend."""
 
 import os
 

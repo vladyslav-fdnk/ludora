@@ -25,6 +25,6 @@ class OrderModelTests(TestCase):
             email="test@example.com",
         )
 
-        self.assertIsNotNone(order.order_number)
+        assert order.order_number is not None
 
         self.assertTrue(order.order_number.startswith("LUD-"))

@@ -1,7 +1,7 @@
 [project]
 name = "backend"
 version = "0.1.0"
-description = "Telegram Game Key Store — Django backend"
+description = "Ludora digital-product marketplace — Django backend"
 requires-python = ">=3.13"
 dependencies = [
     "django>=5.1,<6.0",
@@ -50,7 +50,7 @@ plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 check_untyped_defs = true
 warn_unused_ignores = true
 warn_redundant_casts = true
-exclude = ["migrations/", "/tests/", "conftest\\.py$", "\\.venv/"]
+exclude = ["migrations/", "\\.venv/"]
 
 [[tool.mypy.overrides]]
 module = ["stripe.*", "django_filters.*"]

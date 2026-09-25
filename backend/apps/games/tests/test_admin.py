@@ -28,8 +28,9 @@ class ProductAdminTests(TestCase):
         )
         self.model_admin = ProductAdmin(Product, AdminSite())
         self.request = RequestFactory().post("/")
-        self.request.session = {}
-        self.request._messages = FallbackStorage(self.request)
+        # Minimal session and message storage for calling admin views directly.
+        self.request.session = {}  # type: ignore[assignment]
+        self.request._messages = FallbackStorage(self.request)  # type: ignore[attr-defined]
         self.superuser = User.objects.create_superuser(
             email="product-admin@example.com",
             password="password123",

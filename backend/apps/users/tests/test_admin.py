@@ -11,7 +11,7 @@ class UserAdminTests(TestCase):
     def test_custom_user_is_registered_with_email_configuration(self):
         model_admin = admin.site._registry[User]
 
-        self.assertIsInstance(model_admin, CustomUserAdmin)
+        assert isinstance(model_admin, CustomUserAdmin)
         self.assertIn("email", model_admin.list_display)
         self.assertIn("email", model_admin.search_fields)
         configured_fields = {
