@@ -117,6 +117,14 @@ Requirements: Docker with the Compose plugin.
    docker compose exec backend uv run python manage.py createsuperuser
    ```
 
+6. Optionally load the demo catalogue: 10 products across 5 platforms, each with
+   10 clearly fake `DEMO-...` license keys. The command is idempotent and tops
+   stock back up on every run:
+
+   ```bash
+   docker compose exec backend uv run python manage.py seed_demo
+   ```
+
 Services:
 
 | Service | Address or role |
@@ -159,6 +167,9 @@ Set at least:
   Django Admin works over HTTPS.
 - `DJANGO_BEHIND_HTTPS_PROXY=True` when TLS is terminated in front of nginx.
 - `HTTP_PORT` (default `80`) and `GUNICORN_WORKERS` (default `3`) if needed.
+
+For a demo deployment, load the sample catalogue with
+`docker compose -f docker-compose.prod.yml exec backend uv run python manage.py seed_demo`.
 
 nginx serves `/static/` and `/media/` from volumes and proxies everything else
 to gunicorn. TLS is expected in front of nginx: a cloud load balancer, Caddy, or
